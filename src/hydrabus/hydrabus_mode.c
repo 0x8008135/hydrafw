@@ -53,6 +53,7 @@ extern const mode_exec_t mode_wiegand_exec;
 extern const mode_exec_t mode_lin_exec;
 extern const mode_exec_t mode_smartcard_exec;
 extern const mode_exec_t mode_mmc_exec;
+extern const mode_exec_t mode_usb_exec;
 extern t_token tokens_mode_spi[];
 extern t_token tokens_mode_i2c[];
 extern t_token tokens_mode_uart[];
@@ -69,6 +70,7 @@ extern t_token tokens_mode_wiegand[];
 extern t_token tokens_mode_lin[];
 extern t_token tokens_mode_smartcard[];
 extern t_token tokens_mode_mmc[];
+extern t_token tokens_mode_usb[];
 
 static struct {
 	int token;
@@ -91,6 +93,7 @@ static struct {
 	{ T_LIN, tokens_mode_lin, &mode_lin_exec },
 	{ T_SMARTCARD, tokens_mode_smartcard, &mode_smartcard_exec },
 	{ T_MMC, tokens_mode_mmc, &mode_mmc_exec },
+    { T_USB, tokens_mode_usb, &mode_usb_exec },
 };
 
 const char hydrabus_mode_str_cs_enabled[] =  "/CS ENABLED\r\n";

@@ -91,6 +91,11 @@ typedef struct {
 } i2c_config_t;
 
 typedef struct {
+ 	uint32_t dev_pid;
+ 	uint32_t dev_vid;
+} usb_config_t;
+
+typedef struct {
 	mode_dev_gpio_pull_t dev_gpio_pull;
 	uint32_t dev_speed;
 	uint8_t dev_mode;

@@ -66,7 +66,8 @@ t_mode_config mode_con2  __attribute__ ((section(".ram4"))) = { .proto={ .dev_nu
 
 t_hydra_console consoles[] = {
 	{ .thread_name="console USB1", .sdu=&SDU1, .tl=&tl_con1, .mode = &mode_con1 },
-	{ .thread_name="console USB2", .sdu=&SDU2, .tl=&tl_con2, .mode = &mode_con2 }
+	//KS
+    //{ .thread_name="console USB2", .sdu=&SDU2, .tl=&tl_con2, .mode = &mode_con2 }
 };
 
 THD_FUNCTION(console, arg)
@@ -170,8 +171,9 @@ int main(void)
 	sduObjectInit(&SDU1);
 	sduStart(&SDU1, &serusb1cfg);
 
-	sduObjectInit(&SDU2);
-	sduStart(&SDU2, &serusb2cfg);
+	//KS
+	//sduObjectInit(&SDU2);
+    //sduStart(&SDU2, &serusb2cfg);
 
 	/*
 	 * Activates the USB1 & 2 driver and then the USB bus pull-up on D+.
@@ -179,7 +181,8 @@ int main(void)
 	 * after a reset.
 	 */
 	usbDisconnectBus(serusb1cfg.usbp);
-	usbDisconnectBus(serusb2cfg.usbp);
+	//KS
+    //usbDisconnectBus(serusb2cfg.usbp);
 
 	chThdSleepMilliseconds(500);
 
@@ -194,8 +197,9 @@ int main(void)
 
 	usbConnectBus(serusb1cfg.usbp);
 
-	usbStart(serusb2cfg.usbp, &usb2cfg);
-	usbConnectBus(serusb2cfg.usbp);
+	//KS
+    //usbStart(serusb2cfg.usbp, &usb2cfg);
+	//usbConnectBus(serusb2cfg.usbp);
 
 	/* Wait for USB Enumeration. */
 	chThdSleepMilliseconds(100);
@@ -210,7 +214,9 @@ int main(void)
 	chRegSetThreadName("main");
 	while (TRUE) {
 		local_nb_console = 0;
-		for (i = 0; i < 2; i++) {
+		//KS
+        //for (i = 0; i < 2; i++) {
+		for (i = 0; i < 1; i++) {
 			if (!consoles[i].thread) {
 				if (consoles[i].sdu->config->usbp->state != USB_ACTIVE)
 					continue;

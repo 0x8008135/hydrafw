@@ -163,6 +163,10 @@ const t_token_dict tl_dict[] = {
 	{ T_DELAY, "delay" },
 	{ T_MMC, "mmc" },
 	/* Developer warning add new command(s) here */
+	{ T_USB, "usb"},
+    { T_PID, "pid"},
+    { T_VID, "vid"},
+    /* Developer warning add new command(s) here */
 
 	/* BP-compatible commands */
 	{ T_LEFT_SQ, "[" },
@@ -559,6 +563,47 @@ t_token tokens_mode_uart[] = {
 t_token tokens_uart[] = {
 	UART_PARAMETERS
 	{ }
+};
+#define USB_PARAMETERS \
+    {\
+        T_PID,\
+        .arg_type = T_ARG_STRING,\
+        .help = "Product ID"\
+    },\
+    {\
+        T_VID,\
+        .arg_type = T_ARG_STRING,\
+        .help = "Vendor ID"\
+    },\
+
+t_token tokens_mode_usb[] = {
+    {
+        T_SHOW,
+        .subtokens = tokens_mode_show,
+        .help = "Show USB parameters"
+    },
+    USB_PARAMETERS
+    /* USB-specific commands */
+    {
+        T_EXIT,
+        .help = "Exit USB mode"
+    },
+	{
+		T_READ,
+		.flags = T_FLAG_SUFFIX_TOKEN_DELIM_INT,
+		.help = "Read byte (repeat with :<num>)"
+	},
+	{
+		T_WRITE,
+		.flags = T_FLAG_SUFFIX_TOKEN_DELIM_INT,
+		.help = "Write byte (repeat with :<num>)"
+	},
+    { }
+};
+
+t_token tokens_usb[] = {
+    USB_PARAMETERS
+    { }
 };
 
 #define SMARTCARD_PARAMETERS \
@@ -2221,6 +2266,12 @@ t_token tl_tokens[] = {
 		.help = "SMARTCARD mode",
 		.help_full = "Configuration: smartcard\r\nInteraction: <read/write (value:repeat)>"
 	},
+    {
+        T_USB,
+        .subtokens = tokens_usb,
+        .help = "USB mode",
+        .help_full = "Configuration: usb\r\nInteraction: ..."
+    },
 	{
 		T_DEBUG,
 		.subtokens = tokens_debug,

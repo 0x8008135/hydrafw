@@ -155,6 +155,10 @@ enum {
 	T_DELAY,
 	T_MMC,
 	/* Developer warning add new command(s) here */
+    T_USB,
+    T_PID,
+    T_VID,
+/* Developer warning add new command(s) here */
 
 	/* BP-compatible commands */
 	T_LEFT_SQ,

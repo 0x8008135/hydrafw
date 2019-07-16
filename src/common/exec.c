@@ -214,6 +214,7 @@ static struct cmd_map {
 	{ T_LIN, cmd_mode_init },
 	{ T_SMARTCARD, cmd_mode_init },
 	{ T_MMC, cmd_mode_init },
+	{ T_USB, cmd_mode_init },
 	{ 0, NULL }
 };
 
