@@ -14,9 +14,7 @@ limitations under the License.
 */
 #include "bsp_dac.h"
 #include "bsp_dac_conf.h"
-#include "stm32f405xx.h"
-#include "stm32f4xx_hal.h"
-#include "stm32f4xx_hal_rcc.h"
+#include "stm32.h"
 
 #define NB_DAC (BSP_DEV_DAC_END)
 static DAC_HandleTypeDef dac_handle[NB_DAC];
@@ -178,7 +176,7 @@ void bsp_dac_disable(void)
 bsp_status_t bsp_dac_write_u12(bsp_dev_dac_t dev_num, uint16_t data)
 {
 	uint32_t dac_chan_num;
-	HAL_StatusTypeDef status;
+	bsp_status_t status;
 	DAC_HandleTypeDef* hdac;
 
 	/* Configure DAC regular channel */

@@ -27,6 +27,7 @@
 #include "hydrabus_bbio_rawwire.h"
 #include "hydrabus_mode_twowire.h"
 #include "hydrabus_mode_threewire.h"
+#include "hydrabus_bbio_aux.h"
 
 
 const mode_rawwire_exec_t bbio_twowire = {
@@ -129,17 +130,6 @@ void bbio_mode_rawwire(t_hydra_console *con)
 			default:
 				if ((bbio_subcommand & BBIO_AUX_MASK) == BBIO_AUX_MASK) {
 					cprintf(con, "%c", bbio_aux(con, bbio_subcommand));
-				} else if ((bbio_subcommand & BBIO_RAWWIRE_BULK_TRANSFER) == BBIO_RAWWIRE_BULK_TRANSFER) {
-					// data contains the number of bytes to
-					// write
-					data = (bbio_subcommand & 0b1111) + 1;
-
-					chnRead(con->sdu, tx_data, data);
-					cprint(con, "\x01", 1);
-					for(i=0; i<data; i++) {
-						rx_data[i] = curmode.write_u8(con, tx_data[i]);
-					}
-					cprint(con, (char *)rx_data, data);
 				} else if ((bbio_subcommand & BBIO_RAWWIRE_BULK_BIT) == BBIO_RAWWIRE_BULK_BIT) {
 					// data contains the number of bits to
 					// write
@@ -154,6 +144,17 @@ void bbio_mode_rawwire(t_hydra_console *con)
 					}
 					cprint(con, "\x01", 1);
 
+				} else if ((bbio_subcommand & BBIO_RAWWIRE_BULK_TRANSFER) == BBIO_RAWWIRE_BULK_TRANSFER) {
+					// data contains the number of bytes to
+					// write
+					data = (bbio_subcommand & 0b1111) + 1;
+
+					chnRead(con->sdu, tx_data, data);
+					cprint(con, "\x01", 1);
+					for(i=0; i<data; i++) {
+						rx_data[i] = curmode.write_u8(con, tx_data[i]);
+					}
+					cprint(con, (char *)rx_data, data);
 				} else if ((bbio_subcommand & BBIO_RAWWIRE_BULK_CLK) == BBIO_RAWWIRE_BULK_CLK) {
 					// data contains the number of bytes to
 					// write
@@ -197,9 +198,18 @@ void bbio_mode_rawwire(t_hydra_console *con)
 					} else {
 						proto->config.rawwire.dev_gpio_mode = MODE_CONFIG_DEV_GPIO_OUT_OPENDRAIN;
 					}
+					if(bbio_subcommand & 0b1){
+						proto->config.rawwire.clock_polarity = 1;
+					} else {
+						proto->config.rawwire.clock_polarity = 0;
+					}
 					curmode.pin_init(con);
 					curmode.tim_init(con);
-					curmode.clock_low(con);
+					if (proto->config.rawwire.clock_polarity == 0) {
+						curmode.clock_low(con);
+					} else {
+						curmode.clock_high(con);
+					}
 					curmode.data_low(con);
 
 					cprint(con, "\x01", 1);
@@ -209,9 +219,16 @@ void bbio_mode_rawwire(t_hydra_console *con)
 					} else {
 						proto->config.rawwire.dev_gpio_pull = MODE_CONFIG_DEV_GPIO_NOPULL;
 					}
+					//Set AUX[0] (PC4) value
+					bbio_aux_write((bbio_subcommand & 0b10)>>1);
+
 					curmode.pin_init(con);
 					curmode.tim_init(con);
-					curmode.clock_low(con);
+					if (proto->config.rawwire.clock_polarity == 0) {
+						curmode.clock_low(con);
+					} else {
+						curmode.clock_high(con);
+					}
 					curmode.data_low(con);
 
 					cprint(con, "\x01", 1);

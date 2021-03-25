@@ -17,11 +17,11 @@
 * limitations under the License.
 */
 #include "common.h"
-#include "stm32f4xx_hal.h"
 #include "tokenline.h"
 #include "hydrabus.h"
 #include "bsp.h"
 #include "bsp_gpio.h"
+#include "bsp_tim.h"
 #include "hydrabus_mode_jtag.h"
 #include <string.h>
 
@@ -33,8 +33,6 @@ static void dath(t_hydra_console *con);
 static void datl(t_hydra_console *con);
 static void clk(t_hydra_console *con);
 
-static TIM_HandleTypeDef htim;
-
 static const char* str_prompt_jtag[] = {
 	"jtag1" PROMPT,
 };
@@ -43,7 +41,6 @@ static const char* str_prompt_jtag[] = {
 
 static void init_proto_default(t_hydra_console *con)
 {
-
 	mode_config_proto_t* proto = &con->mode->proto;
 
 	/* Defaults */
@@ -183,31 +180,16 @@ static void jtag_pin_deinit(t_hydra_console *con)
 
 static void tim_init(t_hydra_console *con)
 {
-	htim.Instance = TIM4;
 	mode_config_proto_t* proto = &con->mode->proto;
 
-	htim.Init.Period = 21 - 1;
-	htim.Init.Prescaler = (proto->config.jtag.divider) - 1;
-	htim.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
-	htim.Init.CounterMode = TIM_COUNTERMODE_UP;
-
-	HAL_TIM_Base_MspInit(&htim);
-	__TIM4_CLK_ENABLE();
-	HAL_TIM_Base_Init(&htim);
-	TIM4->SR &= ~TIM_SR_UIF;  //clear overflow flag
-	HAL_TIM_Base_Start(&htim);
+	bsp_tim_init(21, proto->config.jtag.divider, TIM_CLOCKDIVISION_DIV1, TIM_COUNTERMODE_UP);
 }
 
 static void tim_set_prescaler(t_hydra_console *con)
 {
 	mode_config_proto_t* proto = &con->mode->proto;
 
-	HAL_TIM_Base_Stop(&htim);
-	HAL_TIM_Base_DeInit(&htim);
-	htim.Init.Prescaler = (proto->config.jtag.divider) - 1;
-	HAL_TIM_Base_Init(&htim);
-	TIM4->SR &= ~TIM_SR_UIF;  //clear overflow flag
-	HAL_TIM_Base_Start(&htim);
+	bsp_tim_set_prescaler(proto->config.jtag.divider);
 }
 
 static inline void jtag_tms_high(t_hydra_console *con)
@@ -228,20 +210,18 @@ static inline void jtag_clk_high(t_hydra_console *con)
 {
 	mode_config_proto_t* proto = &con->mode->proto;
 
-	while (!(TIM4->SR & TIM_SR_UIF)) {
-	}
+	bsp_tim_wait_irq();
 	bsp_gpio_set(BSP_GPIO_PORTB, proto->config.jtag.tck_pin);
-	TIM4->SR &= ~TIM_SR_UIF;  //clear overflow flag
+	bsp_tim_clr_irq();
 }
 
 static inline void jtag_clk_low(t_hydra_console *con)
 {
 	mode_config_proto_t* proto = &con->mode->proto;
 
-	while (!(TIM4->SR & TIM_SR_UIF)) {
-	}
+	bsp_tim_wait_irq();
 	bsp_gpio_clr(BSP_GPIO_PORTB, proto->config.jtag.tck_pin);
-	TIM4->SR &= ~TIM_SR_UIF;  //clear overflow flag
+	bsp_tim_clr_irq();
 }
 
 static inline void jtag_tdi_high(t_hydra_console *con)
@@ -508,7 +488,7 @@ static void jtag_brute_pins_bypass(t_hydra_console *con, uint8_t num_pins)
 
 	uint8_t tck, tms, tdi, tdo, trst;
 	uint8_t valid_tck, valid_tms, valid_tdi, valid_tdo, valid_trst = 12;
-	uint8_t i;
+	uint8_t pinout_found = 0, i;
 
 	/* Set a dummy pin to prevent pin mismatch */
 	proto->config.jtag.trst_pin = 12;
@@ -535,6 +515,7 @@ static void jtag_brute_pins_bypass(t_hydra_console *con, uint8_t num_pins)
 					}
 					jtag_pin_init(con);
 					if  (jtag_scan_bypass(con)) {
+						pinout_found = 1;
 						jtag_print_pins(con);
 						valid_tms = tms;
 						valid_tck = tck;
@@ -560,11 +541,15 @@ static void jtag_brute_pins_bypass(t_hydra_console *con, uint8_t num_pins)
 		}
 	}
 
-	proto->config.jtag.tms_pin = valid_tms;
-	proto->config.jtag.tck_pin = valid_tck;
-	proto->config.jtag.tdi_pin = valid_tdi;
-	proto->config.jtag.tdo_pin = valid_tdo;
-	proto->config.jtag.trst_pin = valid_trst;
+	if(pinout_found) {
+		proto->config.jtag.tms_pin = valid_tms;
+		proto->config.jtag.tck_pin = valid_tck;
+		proto->config.jtag.tdi_pin = valid_tdi;
+		proto->config.jtag.tdo_pin = valid_tdo;
+		proto->config.jtag.trst_pin = valid_trst;
+	} else {
+		init_proto_default(con);
+	}
 
 	jtag_pin_init(con);
 }
@@ -574,8 +559,8 @@ static void jtag_brute_pins_idcode(t_hydra_console *con, uint8_t num_pins)
 	mode_config_proto_t* proto = &con->mode->proto;
 
 	uint8_t tck, tms, tdo, trst;
-	uint8_t valid_tck, valid_tms, valid_tdo, valid_trst= 12;
-	uint8_t i;
+	uint8_t valid_tck, valid_tms, valid_tdo, valid_trst = 12;
+	uint8_t pinout_found = 0, i;
 
 	/* Set dummy pins to prevent pin mismatch */
 	proto->config.jtag.tdi_pin = 12;
@@ -598,6 +583,7 @@ static void jtag_brute_pins_idcode(t_hydra_console *con, uint8_t num_pins)
 				}
 				jtag_pin_init(con);
 				if  (jtag_scan_idcode(con)) {
+					pinout_found = 1;
 					jtag_print_pins(con);
 					valid_tms = tms;
 					valid_tck = tck;
@@ -620,10 +606,14 @@ static void jtag_brute_pins_idcode(t_hydra_console *con, uint8_t num_pins)
 			}
 		}
 	}
-	proto->config.jtag.tms_pin = valid_tms;
-	proto->config.jtag.tck_pin = valid_tck;
-	proto->config.jtag.tdo_pin = valid_tdo;
-	proto->config.jtag.trst_pin = valid_trst;
+	if(pinout_found) {
+		proto->config.jtag.tms_pin = valid_tms;
+		proto->config.jtag.tck_pin = valid_tck;
+		proto->config.jtag.tdo_pin = valid_tdo;
+		proto->config.jtag.trst_pin = valid_trst;
+	} else {
+		init_proto_default(con);
+	}
 
 	jtag_pin_init(con);
 }
@@ -659,7 +649,11 @@ void openOCD(t_hydra_console *con)
 
 	uint8_t ocd_command, values;
 	uint8_t ocd_parameters[2] = {0};
-	static uint8_t *buffer = (uint8_t *)g_sbuf;
+	uint8_t *buffer = pool_alloc_bytes(0x2000); // 8192 bytes - magic value from bus pirate
+
+	if(buffer == 0) {
+		return;
+	}
 
 	while (!hydrabus_ubtn()) {
 		if(chnReadTimeout(con->sdu, &ocd_command, 1, 1)) {
@@ -741,7 +735,7 @@ void openOCD(t_hydra_console *con)
 					cprintf(con, "%c%c%c", CMD_OCD_TAP_SHIFT, ocd_parameters[0],
 						ocd_parameters[1]);
 
-					chnRead(con->sdu, g_sbuf,((num_sequences+7)/8)*2);
+					chnRead(con->sdu, buffer,((num_sequences+7)/8)*2);
 					i=0;
 					while(num_sequences>0) {
 						bits = (num_sequences > 8) ? 8 : num_sequences;
@@ -762,6 +756,7 @@ void openOCD(t_hydra_console *con)
 			}
 		}
 	}
+	pool_free(buffer);
 }
 
 void jtag_enter_openocd(t_hydra_console *con)

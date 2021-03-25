@@ -88,13 +88,14 @@ enum {
 	T_READ_MF_ULTRALIGHT,
 	T_EMUL_MF_ULTRALIGHT,
 	T_CLONE_MF_ULTRALIGHT,
-	T_SNIFF,
 	T_TRACE_UART1,
 	T_FRAME_TIME,
+	T_PCAP,
 	T_BIN,
 	T_DIRECT_MODE_0,
 	T_DIRECT_MODE_1,
 #endif
+	T_SNIFF,
 	T_GPIO,
 	T_IN,
 	T_OUT,
@@ -151,6 +152,8 @@ enum {
 	T_GUARDTIME,
 	T_PRESCALER,
 	T_CONVENTION,
+	T_DELAY,
+	T_MMC,
 	/* Developer warning add new command(s) here */
 
 	/* BP-compatible commands */
@@ -168,5 +171,8 @@ enum {
 	T_AMPERSAND,
 	T_PERCENT,
 	T_TILDE,
+	T_AUX_OFF,
+	T_AUX_ON,
+	T_AUX_READ,
 };
 

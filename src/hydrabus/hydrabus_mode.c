@@ -25,6 +25,7 @@
 #include "hydrabus.h"
 #include "hydrabus_mode.h"
 #include "hydrabus_trigger.h"
+#include "hydrabus_aux.h"
 #include "mode_config.h"
 
 #include "bsp_rng.h"
@@ -51,6 +52,7 @@ extern const mode_exec_t mode_flash_exec;
 extern const mode_exec_t mode_wiegand_exec;
 extern const mode_exec_t mode_lin_exec;
 extern const mode_exec_t mode_smartcard_exec;
+extern const mode_exec_t mode_mmc_exec;
 extern t_token tokens_mode_spi[];
 extern t_token tokens_mode_i2c[];
 extern t_token tokens_mode_uart[];
@@ -66,6 +68,7 @@ extern t_token tokens_mode_flash[];
 extern t_token tokens_mode_wiegand[];
 extern t_token tokens_mode_lin[];
 extern t_token tokens_mode_smartcard[];
+extern t_token tokens_mode_mmc[];
 
 static struct {
 	int token;
@@ -87,6 +90,7 @@ static struct {
 	{ T_WIEGAND, tokens_mode_wiegand, &mode_wiegand_exec },
 	{ T_LIN, tokens_mode_lin, &mode_lin_exec },
 	{ T_SMARTCARD, tokens_mode_smartcard, &mode_smartcard_exec },
+	{ T_MMC, tokens_mode_mmc, &mode_mmc_exec },
 };
 
 const char hydrabus_mode_str_cs_enabled[] =  "/CS ENABLED\r\n";
@@ -104,6 +108,8 @@ const char hydrabus_mode_str_mdelay[] = "DELAY: %lu ms\r\n";
 static const char mode_str_write_error[] =  "WRITE error:%d\r\n";
 static const char mode_str_read_error[] = "READ error:%d\r\n";
 static const char mode_str_write_read_error[] = "WRITE/READ error:%d\r\n";
+
+static const char mode_str_aux_read[] = "AUX: %d\r\n";
 
 static void hydrabus_mode_read_error(t_hydra_console *con, uint32_t mode_status)
 {
@@ -271,6 +277,15 @@ int cmd_mode_exec(t_hydra_console *con, t_tokenline_parsed *p)
 			break;
 		case T_TRIGGER:
 			t += cmd_trigger(con, p, t + 1);
+			break;
+		case T_AUX_ON:
+			cmd_aux_write(0, 1);
+			break;
+		case T_AUX_OFF:
+			cmd_aux_write(0, 0);
+			break;
+		case T_AUX_READ:
+			cprintf(con, mode_str_aux_read, cmd_aux_read(0));
 			break;
 		case T_EXIT:
 			MAYBE_CALL(con->mode->exec->cleanup);

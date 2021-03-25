@@ -18,12 +18,14 @@
  */
 
 #include "hydrabus_mode_i2c.h"
-#include "bsp_i2c.h"
+#include "bsp_i2c_master.h"
+#include "bsp_i2c_slave.h"
 #include <string.h>
 
 static int exec(t_hydra_console *con, t_tokenline_parsed *p, int token_pos);
 static int show(t_hydra_console *con, t_tokenline_parsed *p);
 static void scan(t_hydra_console *con, t_tokenline_parsed *p);
+static void sniff(t_hydra_console *con);
 
 #define I2C_DEV_NUM (1)
 
@@ -37,7 +39,7 @@ static const char* str_i2c_ack_br = { "ACK\r\n" };
 static const char* str_i2c_nack = { "NACK" };
 static const char* str_i2c_nack_br = { "NACK\r\n" };
 
-static const char* str_bsp_init_err= { "bsp_i2c_init() error %d\r\n" };
+static const char* str_bsp_init_err= { "bsp_i2c_master_init() error %d\r\n" };
 
 #define SPEED_NB (4)
 static uint32_t speeds[SPEED_NB] = {
@@ -46,6 +48,8 @@ static uint32_t speeds[SPEED_NB] = {
 	400000,
 	1000000,
 };
+
+#define SNIFF_BUFFER_LENGTH 4096
 
 static void init_proto_default(t_hydra_console *con)
 {
@@ -56,6 +60,7 @@ static void init_proto_default(t_hydra_console *con)
 	proto->config.i2c.dev_gpio_pull = MODE_CONFIG_DEV_GPIO_PULLUP;
 	proto->config.i2c.dev_speed = 1;
 	proto->config.i2c.ack_pending = 0;
+	proto->config.i2c.dev_mode = DEV_MASTER;
 }
 
 static void show_params(t_hydra_console *con)
@@ -63,10 +68,11 @@ static void show_params(t_hydra_console *con)
 	uint8_t i, cnt;
 	mode_config_proto_t* proto = &con->mode->proto;
 
-	cprintf(con, "GPIO resistor: %s\r\nFrequency: ",
+	cprintf(con, "GPIO resistor: %s\r\nMode: %s\r\nFrequency: ",
 		proto->config.i2c.dev_gpio_pull == MODE_CONFIG_DEV_GPIO_PULLUP ? "pull-up" :
 		proto->config.i2c.dev_gpio_pull == MODE_CONFIG_DEV_GPIO_PULLDOWN ? "pull-down" :
-		"floating");
+		"floating",
+		proto->config.i2c.dev_mode == DEV_MASTER ? "master" : "slave");
 
 	print_freq(con, speeds[proto->config.i2c.dev_speed]);
 
@@ -91,7 +97,7 @@ static int init(t_hydra_console *con, t_tokenline_parsed *p)
 	/* Process cmdline arguments, skipping "i2c". */
 	tokens_used = 1 + exec(con, p, 1);
 
-	bsp_i2c_init(proto->dev_num, proto);
+	bsp_i2c_master_init(proto->dev_num, proto);
 
 	show_params(con);
 
@@ -122,7 +128,7 @@ static int exec(t_hydra_console *con, t_tokenline_parsed *p, int token_pos)
 				proto->config.i2c.dev_gpio_pull = MODE_CONFIG_DEV_GPIO_NOPULL;
 				break;
 			}
-			bsp_status = bsp_i2c_init(proto->dev_num, proto);
+			bsp_status = bsp_i2c_master_init(proto->dev_num, proto);
 			if( bsp_status != BSP_OK) {
 				cprintf(con, str_bsp_init_err, bsp_status);
 				return t;
@@ -141,7 +147,7 @@ static int exec(t_hydra_console *con, t_tokenline_parsed *p, int token_pos)
 				cprintf(con, "Invalid frequency.\r\n");
 				return t;
 			}
-			bsp_status = bsp_i2c_init(proto->dev_num, proto);
+			bsp_status = bsp_i2c_master_init(proto->dev_num, proto);
 			if( bsp_status != BSP_OK) {
 				cprintf(con, str_bsp_init_err, bsp_status);
 				return t;
@@ -149,6 +155,9 @@ static int exec(t_hydra_console *con, t_tokenline_parsed *p, int token_pos)
 			break;
 		case T_SCAN:
 			scan(con, p);
+			break;
+		case T_SNIFF:
+			sniff(con);
 			break;
 		default:
 			return t - token_pos;
@@ -278,7 +287,7 @@ static void cleanup(t_hydra_console *con)
 {
 	mode_config_proto_t* proto = &con->mode->proto;
 
-	bsp_i2c_deinit(proto->dev_num);
+	bsp_i2c_master_deinit(proto->dev_num);
 }
 
 static int show(t_hydra_console *con, t_tokenline_parsed *p)
@@ -324,6 +333,60 @@ static void scan(t_hydra_console *con, t_tokenline_parsed *p)
 
 	if (!found)
 		cprintf(con, "No devices found.\r\n");
+}
+
+static void print_sniff_buffer(t_hydra_console *con, uint16_t *buffer, uint16_t length)
+{
+	uint16_t i = 0;
+	while(i < length) {
+		switch(buffer[i]) {
+		case 0x400:
+			cprint(con, "[", 1);
+			break;
+		case 0x200:
+			cprint(con, "]\r\n", 3);
+			break;
+		default:
+			cprintf(con, "0x%02x", buffer[i]>>1);
+			cprint(con, buffer[i] & 1 ? "-" : "+", 1);
+			break;
+		}
+		i++;
+	}
+}
+
+static void sniff(t_hydra_console *con)
+{
+	bsp_status_t status = BSP_OK;
+	uint16_t *buffer = pool_alloc_bytes(SNIFF_BUFFER_LENGTH); // 8192 bytes
+	uint16_t index = 0;
+
+	if(buffer == 0) {
+		cprintf(con, "Error, unable to get buffer space.\r\n");
+		return;
+	}
+
+	mode_config_proto_t* proto = &con->mode->proto;
+
+	bsp_i2c_master_deinit(proto->dev_num);
+	bsp_i2c_slave_init(proto->dev_num, proto);
+
+	cprintf(con, "Interrupt by pressing user button.\r\n");
+	cprint(con, "\r\n", 2);
+
+	while(!hydrabus_ubtn()) {
+		status = bsp_i2c_slave_sniff(proto->dev_num, &buffer[index]);
+		if(buffer[index] == 0x200 || index == SNIFF_BUFFER_LENGTH || status == BSP_TIMEOUT) {
+			print_sniff_buffer(con, buffer, index+1);
+			index = 0;
+		} else {
+			index++;
+		}
+	}
+
+	pool_free(buffer);
+	bsp_i2c_slave_deinit(proto->dev_num);
+	bsp_i2c_master_init(proto->dev_num, proto);
 }
 
 static const char *get_prompt(t_hydra_console *con)

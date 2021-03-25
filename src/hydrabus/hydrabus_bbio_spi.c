@@ -19,7 +19,6 @@
 
 #include "common.h"
 #include "tokenline.h"
-#include "stm32f4xx_hal.h"
 #include <stdlib.h>
 #include <string.h>
 #include <ctype.h>
@@ -27,6 +26,7 @@
 #include "hydrabus_bbio.h"
 #include "hydrabus_bbio_spi.h"
 #include "bsp_spi.h"
+#include "hydrabus_bbio_aux.h"
 
 void bbio_spi_init_proto_default(t_hydra_console *con)
 {
@@ -96,11 +96,17 @@ void bbio_mode_spi(t_hydra_console *con)
 {
 	uint8_t bbio_subcommand;
 	uint32_t to_rx, to_tx, i;
-	uint8_t *tx_data = (uint8_t *)g_sbuf;
-	uint8_t *rx_data = (uint8_t *)g_sbuf+4096;
+	uint8_t *tx_data = pool_alloc_bytes(0x1000); // 4096 bytes
+	uint8_t *rx_data = pool_alloc_bytes(0x1000); // 4096 bytes
 	uint8_t data;
 	bsp_status_t status;
 	mode_config_proto_t* proto = &con->mode->proto;
+
+	if(tx_data == 0 || rx_data == 0) {
+		pool_free(tx_data);
+		pool_free(rx_data);
+		return;
+	}
 
 	bbio_spi_init_proto_default(con);
 	bsp_spi_init(proto->dev_num, proto);
@@ -111,6 +117,8 @@ void bbio_mode_spi(t_hydra_console *con)
 		if(chnRead(con->sdu, &bbio_subcommand, 1) == 1) {
 			switch(bbio_subcommand) {
 			case BBIO_RESET:
+				pool_free(tx_data);
+				pool_free(rx_data);
 				bsp_spi_deinit(proto->dev_num);
 				return;
 			case BBIO_MODE_ID:
@@ -274,7 +282,7 @@ void bbio_mode_spi(t_hydra_console *con)
 					}
 				} else if ((bbio_subcommand & BBIO_SPI_CONFIG) == BBIO_SPI_CONFIG) {
 					proto->config.spi.dev_polarity = (bbio_subcommand & 0b100)?1:0;
-					proto->config.spi.dev_phase = (bbio_subcommand & 0b10)?0:1;
+					proto->config.spi.dev_phase = (bbio_subcommand & 0b10)?1:0;
 					proto->dev_num = (bbio_subcommand & 0b1)?BSP_DEV_SPI1:BSP_DEV_SPI2;
 					status = bsp_spi_init(proto->dev_num, proto);
 					if(status == BSP_OK) {
@@ -288,9 +296,15 @@ void bbio_mode_spi(t_hydra_console *con)
 					} else {
 						bsp_spi_select(proto->dev_num);
 					}
+					//Set AUX[0] (PC4) value
+					bbio_aux_write((bbio_subcommand & 0b10)>>1);
+
 					cprint(con, "\x01", 1);
 				}
 			}
 		}
 	}
+	pool_free(tx_data);
+	pool_free(rx_data);
+	bsp_spi_deinit(proto->dev_num);
 }

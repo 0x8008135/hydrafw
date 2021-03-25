@@ -1,7 +1,7 @@
 /*
  * HydraBus/HydraNFC
  *
- * Copyright (C) 2014-2015 Benjamin VERNOUX
+ * Copyright (C) 2014-2020 Benjamin VERNOUX
  * Copyright (C) 2014 Bert Vermeulen <bert@biot.com>
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
@@ -28,6 +28,7 @@
 #include "commands.h"
 #include "mode_config.h"
 #include "ff.h"
+#include "alloc.h"
 
 #define ARRAY_SIZE(x) (sizeof((x))/sizeof((x)[0]))
 
@@ -55,54 +56,19 @@
 #define BIT6    (1<<6)
 #define BIT7    (1<<7)
 
-void scs_dwt_cycle_counter_enabled(void);
-#define clear_cyclecounter() ( DWTBase->CYCCNT = 0 )
-#define get_cyclecounter() ( DWTBase->CYCCNT )
-uint64_t get_cyclecounter64(void);
-uint64_t get_cyclecounter64I(void);
-
-void wait_nbcycles(uint32_t nbcycles);
 void DelayUs(uint32_t delay_us);
 void DelayMs(uint32_t delay_ms);
 
-extern uint8_t buf[512] __attribute__ ((section(".cmm")));
 /* Generic large buffer.*/
-extern uint8_t fbuff[2048] __attribute__ ((section(".cmm")));
+extern uint8_t fbuff[2048] __attribute__ ((section(".ram4")));
 
 #define NB_SBUFFER  (65536)
 #define G_SBUF_SDC_BURST_SIZE (NB_SBUFFER/MMCSD_BLOCK_SIZE) /* how many sectors reads at once */
-extern uint32_t g_sbuf_idx;
-extern uint8_t g_sbuf[NB_SBUFFER+128] __attribute__ ((aligned (4)));
 
 /* USB1: Virtual serial port over USB.*/
 extern SerialUSBDriver SDU1;
 /* USB2: Virtual serial port over USB.*/
 extern SerialUSBDriver SDU2;
-
-/* Internal Cycle Counter */
-typedef volatile uint32_t IOREG32;
-typedef struct {
-	IOREG32 DHCSR;
-	IOREG32 DCRSR;
-	IOREG32 DCRDR;
-	IOREG32 DEMCR;
-} CMx_SCS;
-#define SCSBase			((CMx_SCS *)0xE000EDF0U)
-#define SCS_DEMCR		(SCSBase->DEMCR)
-#define SCS_DEMCR_TRCENA	(0x1U << 24)
-typedef struct {
-	IOREG32 CTRL;
-	IOREG32 CYCCNT;
-	IOREG32 CPICNT;
-	IOREG32 EXCCNT;
-	IOREG32 SLEEPCNT;
-	IOREG32 LSUCNT;
-	IOREG32 FOLDCNT;
-	IOREG32 PCSR;
-} CMx_DWT;
-#define DWTBase			((CMx_DWT *)0xE0001000U)
-#define DWT_CTRL		(DWTBase->CTRL)
-#define DWT_CTRL_CYCCNTENA	(0x1U << 0)
 
 #ifndef MIN
 #define MIN(a, b) (a < b ? a : b)
@@ -164,10 +130,10 @@ int cmd_rng(t_hydra_console *con, t_tokenline_parsed *p);
 void token_dump(t_hydra_console *con, t_tokenline_parsed *p);
 void cprint(t_hydra_console *con, const char *data, const uint32_t size);
 void cprintf(t_hydra_console *con, const char *fmt, ...);
-void print_dbg(const char *data, const uint32_t size);
-void printf_dbg(const char *fmt, ...);
 void print_hex(t_hydra_console *con, uint8_t* data, uint8_t size);
 uint8_t parse_escaped_string(char * input, uint8_t * output);
+uint8_t hexchartonibble(char hex);
+uint8_t hex2byte(char * hex);
 
 uint8_t reverse_u8(uint8_t value);
 uint16_t reverse_u16(uint16_t value);

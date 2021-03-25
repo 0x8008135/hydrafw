@@ -12,11 +12,11 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.
 */
+#pragma GCC push_options
+#pragma GCC optimize ("Og")
+
 #include "bsp_pwm.h"
 #include "bsp_pwm_conf.h"
-#include "stm32f405xx.h"
-#include "stm32f4xx_hal.h"
-#include "stm32f4xx_hal_rcc.h"
 
 #define NB_PWM (BSP_DEV_PWM_END)
 
@@ -135,7 +135,7 @@ bsp_status_t bsp_pwm_init(bsp_dev_pwm_t dev_num)
 	htim.Init.Prescaler = 0;
 	htim.Init.ClockDivision = 0;
 	htim.Init.CounterMode = TIM_COUNTERMODE_UP;
-	if(HAL_TIM_Base_Init(&htim) != HAL_OK) {
+	if(HAL_TIM_PWM_Init(&htim) != HAL_OK) {
 		return BSP_ERROR;
 	}
 
@@ -264,3 +264,4 @@ void bsp_pwm_get(bsp_dev_pwm_t dev_num, uint32_t* frequency, uint32_t* duty_cycl
 	else
 		*duty_cycle_percent = ccr / (arr / 100);
 }
+#pragma GCC pop_options

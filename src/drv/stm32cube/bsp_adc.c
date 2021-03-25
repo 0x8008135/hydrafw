@@ -12,17 +12,18 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.
 */
+#include "ch.h"
 #include "bsp_adc.h"
 #include "bsp_adc_conf.h"
 #include "bsp_trigger.h"
-#include "stm32f405xx.h"
-#include "stm32f4xx_hal.h"
-#include "stm32f4xx_hal_rcc.h"
+#include "stm32.h"
 
 #define ADCx_TIMEOUT_MAX (10) // About 1msec (see common/chconf.h/CH_CFG_ST_FREQUENCY) can be aborted by UBTN too
 #define NB_ADC (BSP_DEV_ADC_END)
 static ADC_HandleTypeDef adc_handle[NB_ADC];
 static ADC_ChannelConfTypeDef adc_chan_conf[NB_ADC];
+
+extern void DelayUs(uint32_t delay_us);
 
 /** \brief ADC GPIO HW DeInit.
  *
@@ -169,7 +170,7 @@ bsp_status_t bsp_adc_read_u16(bsp_dev_adc_t dev_num, uint16_t* rx_data, uint8_t 
 {
 	(void)dev_num;
 	int i;
-	HAL_StatusTypeDef status;
+	bsp_status_t status;
 	ADC_HandleTypeDef* hadc;
 
 	status = BSP_ERROR;
@@ -177,9 +178,9 @@ bsp_status_t bsp_adc_read_u16(bsp_dev_adc_t dev_num, uint16_t* rx_data, uint8_t 
 
 	for(i=0; i<nb_data; i++) {
 		HAL_ADC_Start(hadc);
-		status = HAL_ADC_PollForConversion(hadc, ADCx_TIMEOUT_MAX);
+		status = (bsp_status_t) HAL_ADC_PollForConversion(hadc, ADCx_TIMEOUT_MAX);
 
-		if(status != HAL_OK)
+		if(status != BSP_OK)
 			return status;
 
 		rx_data[i] = HAL_ADC_GetValue(hadc);
@@ -196,7 +197,7 @@ bsp_status_t bsp_adc_read_u16(bsp_dev_adc_t dev_num, uint16_t* rx_data, uint8_t 
  * \return bsp_status_t: Status of the trigger (BSP_OK or BSP_TIMEOUT)
  *
  */
-bsp_status_t bsp_adc_trigger(uint32_t low, uint32_t high)
+bsp_status_t bsp_adc_trigger(uint32_t low, uint32_t high, uint32_t delay)
 {
 	ADC_HandleTypeDef* hadc;
 	hadc = &adc_handle[BSP_DEV_ADC1];
@@ -224,15 +225,19 @@ bsp_status_t bsp_adc_trigger(uint32_t low, uint32_t high)
 		return BSP_ERROR;
 	}
 	bsp_trigger_init();
-	bsp_trigger_on();
+	bsp_trigger_off();
+	chSysLock();
+	__HAL_ADC_CLEAR_FLAG(hadc, ADC_AWD_EVENT);
 	HAL_ADC_Start(hadc);
 	HAL_ADC_PollForEvent(hadc, ADC_AWD_EVENT, 100000);
 	if (hadc->State & HAL_ADC_STATE_AWD1) {
-		bsp_trigger_off();
+		DelayUs(delay);
+		bsp_trigger_on();
 		status = BSP_OK;
 	} else  {
 		status = BSP_TIMEOUT;
 	}
+	chSysUnlock();
 	bsp_adc_deinit(BSP_DEV_ADC1);
 	return status;
 }

@@ -87,6 +87,7 @@ typedef struct {
 	mode_dev_gpio_pull_t dev_gpio_pull;
 	uint32_t dev_speed;
 	uint8_t ack_pending : 1;
+	uint8_t dev_mode;
 } i2c_config_t;
 
 typedef struct {
@@ -148,6 +149,7 @@ typedef struct {
 	uint8_t clk_pin;
 	uint8_t sdi_pin;
 	uint8_t sdo_pin;
+	uint8_t clock_polarity;
 } rawwire_config_t;
 
 typedef struct {
@@ -163,6 +165,10 @@ typedef struct {
 typedef struct {
 	uint8_t dev_function;
 } hydranfc_config_t;
+
+typedef struct {
+	uint8_t bus_width;
+} mmc_config_t;
 
 #define MODE_CONFIG_PROTO_BUFFER_SIZE (256)
 typedef struct {
@@ -180,6 +186,7 @@ typedef struct {
 		wiegand_config_t wiegand;
 		sump_config_t sump;
 		hydranfc_config_t hydranfc;
+		mmc_config_t mmc;
 	} config;
 
 	uint8_t aux_config;

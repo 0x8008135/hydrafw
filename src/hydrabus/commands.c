@@ -24,7 +24,7 @@
 #pragma GCC diagnostic ignored "-Wmissing-field-initializers"
 
 /* Developer warning keep this list synchronized with same number of items and same items order as commands.h => enum */
-t_token_dict tl_dict[] = {
+const t_token_dict tl_dict[] = {
 	{ /* Dummy entry */ },
 	{ T_HELP, "help" },
 	{ T_HISTORY, "history" },
@@ -96,13 +96,14 @@ t_token_dict tl_dict[] = {
 	{ T_READ_MF_ULTRALIGHT, "read-mf-ul" },
 	{ T_EMUL_MF_ULTRALIGHT, "emul-mf-ul" },
 	{ T_CLONE_MF_ULTRALIGHT, "clone-mf-ul" },
-	{ T_SNIFF, "sniff" },
 	{ T_TRACE_UART1, "trace-uart1" },
 	{ T_FRAME_TIME, "frame-time" },
+	{ T_PCAP, "pcap" },
 	{ T_BIN, "bin" },
 	{ T_DIRECT_MODE_0, "dm0" },
 	{ T_DIRECT_MODE_1, "dm1" },
 #endif
+	{ T_SNIFF, "sniff" },
 	{ T_GPIO, "gpio" },
 	{ T_IN, "in" },
 	{ T_OUT, "out" },
@@ -159,6 +160,8 @@ t_token_dict tl_dict[] = {
 	{ T_GUARDTIME, "guardtime" },
 	{ T_PRESCALER, "prescaler" },
 	{ T_CONVENTION, "convention" },
+	{ T_DELAY, "delay" },
+	{ T_MMC, "mmc" },
 	/* Developer warning add new command(s) here */
 
 	/* BP-compatible commands */
@@ -176,6 +179,9 @@ t_token_dict tl_dict[] = {
 	{ T_AMPERSAND, "&" },
 	{ T_PERCENT, "%" },
 	{ T_TILDE, "~" },
+	{ T_AUX_OFF, "a" },
+	{ T_AUX_ON, "A" },
+	{ T_AUX_READ, "@" },
 	{ }
 };
 
@@ -275,8 +281,13 @@ t_token tokens_mode_adc_trigger[] = {
 		.help = "ADC trigger higher bound"
 	},
 	{
+		T_DELAY,
+		.arg_type = T_ARG_UINT,
+		.help = "ADC trigger delay (uS)"
+	},
+	{
 		T_START,
-		.help = "Stat trigger"
+		.help = "Start trigger"
 	},
 	{ }
 };
@@ -351,6 +362,10 @@ t_token tokens_mode_nfc_sniff[] = {
 	{
 		T_FRAME_TIME,
 		.help = "Add start/end frame timestamp(in CPU cycles)"
+	},
+	{
+		T_PCAP,
+		.help = "Save output file in Wireshark PCAP format"
 	},
 	{ }
 };
@@ -515,8 +530,24 @@ t_token tokens_mode_uart[] = {
 		.help = "Write a random byte (repeat with :<num>)"
 	},
 	{
+		T_AUX_ON,
+		.help = "Toggle AUX[0](PC4) high"
+	},
+	{
+		T_AUX_OFF,
+		.help = "Toggle AUX[0](PC4) low"
+	},
+	{
+		T_AUX_READ,
+		.help = "Read AUX[0](PC4)"
+	},
+	{
 		T_BRIDGE,
 		.help = "UART bridge mode"
+	},
+	{
+		T_SCAN,
+		.help = "Measure baudrate (PC6)"
 	},
 	{
 		T_EXIT,
@@ -656,6 +687,18 @@ t_token tokens_mode_smartcard[] = {
 		.help = "Write a random byte (repeat with :<num>)"
 	},
 	{
+		T_AUX_ON,
+		.help = "Toggle AUX[0](PC4) high"
+	},
+	{
+		T_AUX_OFF,
+		.help = "Toggle AUX[0](PC4) low"
+	},
+	{
+		T_AUX_READ,
+		.help = "Read AUX[0](PC4)"
+	},
+	{
 		T_EXIT,
 		.help = "Exit SMARTCARD mode"
 	},
@@ -730,6 +773,18 @@ t_token tokens_mode_lin[] = {
 		T_TILDE,
 		.flags = T_FLAG_SUFFIX_TOKEN_DELIM_INT,
 		.help = "Write a random byte (repeat with :<num>)"
+	},
+	{
+		T_AUX_ON,
+		.help = "Toggle AUX[0](PC4) high"
+	},
+	{
+		T_AUX_OFF,
+		.help = "Toggle AUX[0](PC4) low"
+	},
+	{
+		T_AUX_READ,
+		.help = "Read AUX[0](PC4)"
 	},
 	{
 		T_EXIT,
@@ -819,6 +874,18 @@ t_token tokens_mode_can[] = {
 		.help = "Write a random byte (repeat with :<num>)"
 	},
 	{
+		T_AUX_ON,
+		.help = "Toggle AUX[0](PC4) high"
+	},
+	{
+		T_AUX_OFF,
+		.help = "Toggle AUX[0](PC4) low"
+	},
+	{
+		T_AUX_READ,
+		.help = "Read AUX[0](PC4)"
+	},
+	{
 		T_SLCAN,
 		.help = "slcan (LAWICEL) mode"
 	},
@@ -863,6 +930,10 @@ t_token tokens_mode_i2c[] = {
 	{
 		T_SCAN,
 		.help = "Scan for connected devices"
+	},
+	{
+		T_SNIFF,
+		.help = "Sniff I2C bus"
 	},
 	{
 		T_START,
@@ -919,6 +990,18 @@ t_token tokens_mode_i2c[] = {
 		T_TILDE,
 		.flags = T_FLAG_SUFFIX_TOKEN_DELIM_INT,
 		.help = "Write a random byte (repeat with :<num>)"
+	},
+	{
+		T_AUX_ON,
+		.help = "Toggle AUX[0](PC4) high"
+	},
+	{
+		T_AUX_OFF,
+		.help = "Toggle AUX[0](PC4) low"
+	},
+	{
+		T_AUX_READ,
+		.help = "Read AUX[0](PC4)"
 	},
 	{
 		T_EXIT,
@@ -1028,6 +1111,18 @@ t_token tokens_mode_spi[] = {
 		.help = "Write a random byte (repeat with :<num>)"
 	},
 	{
+		T_AUX_ON,
+		.help = "Toggle AUX[0](PC4) high"
+	},
+	{
+		T_AUX_OFF,
+		.help = "Toggle AUX[0](PC4) low"
+	},
+	{
+		T_AUX_READ,
+		.help = "Read AUX[0](PC4)"
+	},
+	{
 		T_EXIT,
 		.help = "Exit SPI mode"
 	},
@@ -1040,9 +1135,6 @@ t_token tokens_spi[] = {
 };
 
 #define JTAG_PARAMETERS \
-	{ T_DEVICE, \
-		.arg_type = T_ARG_UINT, \
-		.help = "JTAG device (1)" }, \
 	{ T_PULL, \
 		.arg_type = T_ARG_TOKEN, \
 		.subtokens = tokens_gpio_pull, \
@@ -1179,6 +1271,18 @@ t_token tokens_mode_jtag[] = {
 		.help = "Write a random byte (repeat with :<num>)"
 	},
 	{
+		T_AUX_ON,
+		.help = "Toggle AUX[0](PC4) high"
+	},
+	{
+		T_AUX_OFF,
+		.help = "Toggle AUX[0](PC4) low"
+	},
+	{
+		T_AUX_READ,
+		.help = "Read AUX[0](PC4)"
+	},
+	{
 		T_EXIT,
 		.help = "Exit JTAG mode"
 	},
@@ -1191,9 +1295,6 @@ t_token tokens_jtag[] = {
 };
 
 #define ONEWIRE_PARAMETERS \
-	{ T_DEVICE, \
-		.arg_type = T_ARG_UINT, \
-		.help = "1-wire device (1)" }, \
 	{ T_PULL, \
 		.arg_type = T_ARG_TOKEN, \
 		.subtokens = tokens_gpio_pull, \
@@ -1277,6 +1378,18 @@ t_token tokens_mode_onewire[] = {
 		.help = "Write a random byte (repeat with :<num>)"
 	},
 	{
+		T_AUX_ON,
+		.help = "Toggle AUX[0](PC4) high"
+	},
+	{
+		T_AUX_OFF,
+		.help = "Toggle AUX[0](PC4) low"
+	},
+	{
+		T_AUX_READ,
+		.help = "Read AUX[0](PC4)"
+	},
+	{
 		T_EXIT,
 		.help = "Exit 1-wire mode"
 	},
@@ -1289,9 +1402,6 @@ t_token tokens_onewire[] = {
 };
 
 #define TWOWIRE_PARAMETERS \
-	{ T_DEVICE, \
-		.arg_type = T_ARG_UINT, \
-		.help = "2-wire device (1)" }, \
 	{ T_PULL, \
 		.arg_type = T_ARG_TOKEN, \
 		.subtokens = tokens_gpio_pull, \
@@ -1333,6 +1443,11 @@ t_token tokens_mode_twowire[] = {
 		T_FREQUENCY,
 		.arg_type = T_ARG_FLOAT,
 		.help = "Bus frequency"
+	},
+	{
+		T_POLARITY,
+		.arg_type = T_ARG_UINT,
+		.help = "Clock polarity (0/1)"
 	},
 	{
 		T_IDCODE,
@@ -1397,6 +1512,18 @@ t_token tokens_mode_twowire[] = {
 		.help = "Write a random byte (repeat with :<num>)"
 	},
 	{
+		T_AUX_ON,
+		.help = "Toggle AUX[0](PC4) high"
+	},
+	{
+		T_AUX_OFF,
+		.help = "Toggle AUX[0](PC4) low"
+	},
+	{
+		T_AUX_READ,
+		.help = "Read AUX[0](PC4)"
+	},
+	{
 		T_EXIT,
 		.help = "Exit 2-wire mode"
 	},
@@ -1409,9 +1536,6 @@ t_token tokens_twowire[] = {
 };
 
 #define THREEWIRE_PARAMETERS \
-	{ T_DEVICE, \
-		.arg_type = T_ARG_UINT, \
-		.help = "3-wire device (1)" }, \
 	{ T_PULL, \
 		.arg_type = T_ARG_TOKEN, \
 		.subtokens = tokens_gpio_pull, \
@@ -1448,6 +1572,11 @@ t_token tokens_mode_threewire[] = {
 		T_FREQUENCY,
 		.arg_type = T_ARG_FLOAT,
 		.help = "Bus frequency"
+	},
+	{
+		T_POLARITY,
+		.arg_type = T_ARG_UINT,
+		.help = "Clock polarity (0/1)"
 	},
 	{
 		T_ARG_UINT,
@@ -1503,6 +1632,18 @@ t_token tokens_mode_threewire[] = {
 		.help = "Write a random byte (repeat with :<num>)"
 	},
 	{
+		T_AUX_ON,
+		.help = "Toggle AUX[0](PC4) high"
+	},
+	{
+		T_AUX_OFF,
+		.help = "Toggle AUX[0](PC4) low"
+	},
+	{
+		T_AUX_READ,
+		.help = "Read AUX[0](PC4)"
+	},
+	{
 		T_EXIT,
 		.help = "Exit 3-wire mode"
 	},
@@ -1534,6 +1675,34 @@ t_token tokens_mode_flash[] = {
 };
 
 t_token tokens_flash[] = {
+	{ }
+};
+
+t_token tokens_mode_mmc[] = {
+	{
+		T_SHOW,
+		.subtokens = tokens_mode_show,
+		.help = "Show mmc parameters"
+	},
+	/* mmc-specific commands */
+	{
+		T_PINS,
+		.arg_type = T_ARG_UINT,
+		.help = "Number of data pins (1 or 4)"
+	},
+	{
+		T_ID,
+		.help = "Displays the CID and CSD registers"
+	},
+	/* BP commands */
+	{
+		T_EXIT,
+		.help = "Exit mmc mode"
+	},
+	{ }
+};
+
+t_token tokens_mmc[] = {
 	{ }
 };
 
@@ -1595,9 +1764,6 @@ t_token tokens_gpio[] = {
 };
 
 #define WIEGAND_PARAMETERS \
-	{ T_DEVICE, \
-		.arg_type = T_ARG_UINT, \
-		.help = "Wiegand device (1)" }, \
 	{ T_PULL, \
 		.arg_type = T_ARG_TOKEN, \
 		.subtokens = tokens_gpio_pull, \
@@ -1657,6 +1823,18 @@ t_token tokens_mode_wiegand[] = {
 		T_TILDE,
 		.flags = T_FLAG_SUFFIX_TOKEN_DELIM_INT,
 		.help = "Write a random byte (repeat with :<num>)"
+	},
+	{
+		T_AUX_ON,
+		.help = "Toggle AUX[0](PC4) high"
+	},
+	{
+		T_AUX_OFF,
+		.help = "Toggle AUX[0](PC4) low"
+	},
+	{
+		T_AUX_READ,
+		.help = "Read AUX[0](PC4)"
 	},
 	{
 		T_EXIT,
@@ -2020,6 +2198,11 @@ t_token tl_tokens[] = {
 		T_FLASH,
 		.subtokens = tokens_flash,
 		.help = "NAND flash mode"
+	},
+	{
+		T_MMC,
+		.subtokens = tokens_mmc,
+		.help = "MMC/eMMC mode"
 	},
 	{
 		T_WIEGAND,

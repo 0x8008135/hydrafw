@@ -19,7 +19,6 @@
 
 #include "common.h"
 #include "tokenline.h"
-#include "stm32f4xx_hal.h"
 #include <stdlib.h>
 #include <string.h>
 #include <ctype.h>
@@ -56,13 +55,19 @@ void bbio_mode_smartcard(t_hydra_console *con)
 {
 	uint32_t to_rx, to_tx, i;
 	uint8_t bbio_subcommand;
-	uint8_t *tx_data = (uint8_t *)g_sbuf;
-	uint8_t *rx_data = (uint8_t *)g_sbuf+4096;
+	uint8_t *tx_data = pool_alloc_bytes(0x1000); // 4096 bytes
+	uint8_t *rx_data = pool_alloc_bytes(0x1000); // 4096 bytes
 	uint8_t data;
 	uint32_t dev_speed=0;
 	uint32_t final_baudrate;
 	bsp_status_t status;
 	mode_config_proto_t* proto = &con->mode->proto;
+
+	if(tx_data == 0 || rx_data == 0) {
+		pool_free(tx_data);
+		pool_free(rx_data);
+		return;
+	}
 
 	bbio_smartcard_init_proto_default(con);
 	bsp_smartcard_init(proto->dev_num, proto);
@@ -73,6 +78,8 @@ void bbio_mode_smartcard(t_hydra_console *con)
 		if(chnRead(con->sdu, &bbio_subcommand, 1) == 1) {
 			switch(bbio_subcommand) {
 			case BBIO_RESET:
+				pool_free(tx_data);
+				pool_free(rx_data);
 				bsp_smartcard_deinit(proto->dev_num);
 				return;
 			case BBIO_MODE_ID:
@@ -174,6 +181,14 @@ void bbio_mode_smartcard(t_hydra_console *con)
 					cprint(con, "\x01", 1);
 				}
 				break;
+			case BBIO_SMARTCARD_ATR:
+				bsp_smartcard_set_rst(proto->dev_num, 0);
+				DelayMs(1);
+				bsp_smartcard_set_rst(proto->dev_num, 1);
+				i = bsp_smartcard_read_u8_timeout(proto->dev_num, rx_data, 33, TIME_MS2I(500));
+				cprint(con, (char *)&i, 1);
+				cprint(con, (char *)rx_data, i);
+				break;
 			default:
 				if ((bbio_subcommand & BBIO_AUX_MASK) == BBIO_AUX_MASK) {
 					cprintf(con, "%c", bbio_aux(con, bbio_subcommand));
@@ -195,4 +210,7 @@ void bbio_mode_smartcard(t_hydra_console *con)
 			}
 		}
 	}
+	pool_free(tx_data);
+	pool_free(rx_data);
+	bsp_smartcard_deinit(proto->dev_num);
 }

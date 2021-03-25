@@ -33,15 +33,8 @@
 #define HYDRAFW_VERSION "HydraFW (HydraBus) " HYDRAFW_GIT_TAG " " HYDRAFW_CHECKIN_DATE
 #define TEST_WA_SIZE    THD_WORKING_AREA_SIZE(256)
 
-static volatile uint64_t cyclecounter64 = 0;
-
-/* CCM = .ram4 */
-uint8_t buf[512] __attribute__ ((section(".ram4")));
 /* Generic large buffer.*/
 uint8_t fbuff[2048] __attribute__ ((section(".ram4")));
-
-uint32_t g_sbuf_idx;
-uint8_t g_sbuf[NB_SBUFFER+128] __attribute__ ((aligned (4)));
 
 extern uint32_t debug_flags;
 extern char log_dest[];
@@ -79,7 +72,6 @@ void cprint(t_hydra_console *con, const char *data, const uint32_t size)
 {
 	stream_write(con, data, size);
 }
-
 
 void print_hex(t_hydra_console *con, uint8_t* data, uint8_t size)
 {
@@ -125,96 +117,6 @@ void cprintf(t_hydra_console *con, const char *fmt, ...)
 	stream_write(con, cprintf_buff, real_size);
 }
 
-/** \brief print debug through Semi Hosting(SWD debug) & SWV
- *
- * \param data const char*
- * \param size const uint32_t
- * \return void
- *
- */
-void print_dbg(const char *data, const uint32_t size)
-{
-	static uint32_t args[3];
-
-	args[0] = 1;
-	args[1] = (uint32_t)data;
-	args[2] = size;
-	/* Semihosting SWI print through SWD/JTAG debugger */
-	asm(	"mov r0, #5\n"
-		"mov r1, %0\n"
-		"bkpt 0x00AB" : : "r"(args) : "r0", "r1");
-
-#if 0
-	{
-		int i;
-		/* SWV Debug requires PB3 configured as SWO & connected to SWD last pin */
-		for(i = 0; i<size; i++)
-			ITM_SendChar(data[i]); /* core_cm4.h */
-	}
-#endif
-}
-
-/** \brief printf debug through Semi Hosting(SWD debug)
- *
- * \param fmt const char*
- * \param ...
- * \return void
- *
- */
-void printf_dbg(const char *fmt, ...)
-{
-	int real_size;
-	va_list va_args;
-#define PRINTF_DBG_BUFFER_SIZE (80)
-	static char printf_dbg_string[PRINTF_DBG_BUFFER_SIZE+1];
-	static uint32_t args[3];
-
-	va_start(va_args, fmt);
-	real_size = vsnprintf(printf_dbg_string, PRINTF_DBG_BUFFER_SIZE, fmt, va_args);
-	/* Semihosting SWI print through SWD/JTAG debugger */
-	args[0] = 1;
-	args[1] = (uint32_t)printf_dbg_string;
-	args[2] = real_size;
-	asm(	"mov r0, #5\n"
-		"mov r1, %0\n"
-		"bkpt 0x00AB" : : "r"(args) : "r0", "r1");
-
-#if 0
-	{
-		int i;
-		/* SWV Debug requires PB3 configured as SWO & connected to SWD last pin */
-		for(i = 0; i<real_size; i++)
-			ITM_SendChar(printf_dbg_string[i]); /* core_cm4.h */
-	}
-#endif
-	va_end(va_args);
-}
-
-/* Internal Cycle Counter for measurement */
-void scs_dwt_cycle_counter_enabled(void)
-{
-	SCS_DEMCR |= SCS_DEMCR_TRCENA;
-	DWT_CTRL  |= DWT_CTRL_CYCCNTENA;
-}
-
-void wait_nbcycles(uint32_t nbcycles)
-{
-	if (nbcycles < 10) {
-		return;
-	} else
-		nbcycles-=10; /* Remove 10 cycles because of code overhead */
-
-	/* Disable IRQ globally */
-	__asm__("cpsid i");
-
-	clear_cyclecounter();
-
-	while ( get_cyclecounter() < nbcycles );
-
-	/* Enable IRQ globally */
-	__asm__("cpsie i");
-}
-
 /**
 * @brief  Inserts a delay time in uS.
 * @param  delay_us: specifies the delay time in micro second.
@@ -237,13 +139,28 @@ void DelayMs(uint32_t delay_ms)
 
 void cmd_show_memory(t_hydra_console *con)
 {
-  size_t n, total, largest;
+	uint32_t used, free;
+	size_t n, total, largest;
 
-  n = chHeapStatus(NULL, &total, &largest);
+	n = chHeapStatus(NULL, &total, &largest);
 	cprintf(con, "core free memory : %u bytes\r\n", chCoreGetStatusX());
 	cprintf(con, "heap fragments   : %u\r\n", n);
-  cprintf(con, "heap free total  : %u bytes\r\n", total);
+	cprintf(con, "heap free total  : %u bytes\r\n", total);
 	cprintf(con, "heap free largest: %u bytes\r\n", largest);
+	free = pool_stats_free();
+	used = pool_stats_used();
+	cprintf(con, "pool free : %u blocks\r\n", free);
+	cprintf(con, "pool used : %u blocks\r\n", used);
+#ifdef MAKE_DEBUG
+	uint8_t * blocks;
+	blocks = pool_stats_blocks();
+	cprintf(con, "pool block status: \r\n");
+	for(n=0; n<POOL_BLOCK_NUMBER; n++) {
+		cprintf(con, "%02x ", blocks[n]);
+	}
+	cprint(con, "\r\n", 2);
+#endif
+
 }
 
 void cmd_show_threads(t_hydra_console *con)
@@ -278,8 +195,8 @@ void cmd_show_system(t_hydra_console *con)
 
 	cprintf(con, "%s\r\n", HYDRAFW_VERSION);
 
-	cycles_start = get_cyclecounter();
-	cycles64 = get_cyclecounter64();
+	cycles_start = bsp_get_cyclecounter();
+	cycles64 = bsp_get_cyclecounter64();
   system_time = osalOsGetSystemTimeX();
 	cprintf(con, "sysTime: 0x%08x.\r\n", system_time);
 	cprintf(con, "cyclecounter: 0x%08x cycles.\r\n", cycles_start);
@@ -287,9 +204,9 @@ void cmd_show_system(t_hydra_console *con)
 		(uint32_t)(cycles64 >> 32),
 		(uint32_t)(cycles64 & 0xFFFFFFFF));
 
-	cycles_start = get_cyclecounter();
+	cycles_start = bsp_get_cyclecounter();
 	DelayUs(10000);
-	cycles_stop = get_cyclecounter();
+	cycles_stop = bsp_get_cyclecounter();
 	cycles_delta = cycles_stop - cycles_start;
 	cprintf(con, "10ms delay: %d cycles.\r\n\r\n", cycles_delta);
 
@@ -351,18 +268,6 @@ int cmd_show(t_hydra_console *con, t_tokenline_parsed *p)
 		return FALSE;
 
 	return TRUE;
-}
-
-void waitcycles(uint32_t nbcycles)
-{
-	if (nbcycles < 20) {
-		return;
-	} else
-		nbcycles-=20; /* Remove 20 cycles because of code overhead */
-
-	clear_cyclecounter();
-
-	while ( get_cyclecounter() < nbcycles );
 }
 
 /* Just debug to check Timing and accuracy with output pin */
@@ -428,86 +333,86 @@ int cmd_debug_timing(t_hydra_console *con, t_tokenline_parsed *p)
 
 		/* Delay 1us */
 		tick = ticks_1us;
-		waitcycles(tick);
+		wait_delay(tick);
 
 		/* Freq 10Mhz */
 		tick = ticks10MHz;
 		for(i=0; i<16; i++) {
 			TST_ON;
-			waitcycles(tick);
+			wait_delay(tick);
 			TST_OFF;
-			waitcycles(tick);
+			wait_delay(tick);
 
 			TST_ON;
-			waitcycles(tick);
+			wait_delay(tick);
 			TST_OFF;
-			waitcycles(tick);
+			wait_delay(tick);
 
 			TST_ON;
-			waitcycles(tick);
+			wait_delay(tick);
 			TST_OFF;
-			waitcycles(tick);
+			wait_delay(tick);
 
 			TST_ON;
-			waitcycles(tick);
+			wait_delay(tick);
 			TST_OFF;
-			waitcycles(tick);
+			wait_delay(tick);
 		}
 
 		/* Delay 1us */
 		tick = ticks_1us;
-		waitcycles(tick);
+		wait_delay(tick);
 
 		/* Freq 3.39Mhz */
 		tick = ticks3_39MHz;
 		for(i=0; i<16; i++) {
 			TST_ON;
-			waitcycles(tick);
+			wait_delay(tick);
 			TST_OFF;
-			waitcycles(tick);
+			wait_delay(tick);
 
 			TST_ON;
-			waitcycles(tick);
+			wait_delay(tick);
 			TST_OFF;
-			waitcycles(tick);
+			wait_delay(tick);
 
 			TST_ON;
-			waitcycles(tick);
+			wait_delay(tick);
 			TST_OFF;
-			waitcycles(tick);
+			wait_delay(tick);
 
 			TST_ON;
-			waitcycles(tick);
+			wait_delay(tick);
 			TST_OFF;
-			waitcycles(tick);
+			wait_delay(tick);
 		}
 
 		/* Delay 1us */
 		tick = ticks_1us;
-		waitcycles(tick);
+		wait_delay(tick);
 
 		/* Freq 1Mhz */
 		tick = tick1MHz;
 		for(i=0; i<16; i++) {
 			TST_ON;
-			waitcycles(tick);
+			wait_delay(tick);
 			TST_OFF;
-			waitcycles(tick);
+			wait_delay(tick);
 
 			TST_ON;
-			waitcycles(tick);
+			wait_delay(tick);
 			TST_OFF;
-			waitcycles(tick);
+			wait_delay(tick);
 
 			TST_ON;
-			waitcycles(tick);
+			wait_delay(tick);
 			TST_OFF;
-			waitcycles(tick);
+			wait_delay(tick);
 
 			TST_ON;
-			waitcycles(tick);
+			wait_delay(tick);
 			TST_OFF;
-			waitcycles(tick);
+			wait_delay(tick);
 		}
 
 	}
@@ -526,10 +431,11 @@ int cmd_debug_test_rx(t_hydra_console *con, t_tokenline_parsed *p)
 {
 	(void)p;
 	BaseSequentialStream* chp = con->bss;
+	uint8_t * inbuf = pool_alloc_bytes(0x1000); // 4096 bytes
 
 	cprintf(con, "Test debug-rx started, stop it with UBTN + Key\r\n");
 	while(1) {
-		chnRead(chp, (uint8_t *)g_sbuf, sizeof(g_sbuf) - 1);
+		chnRead(chp, inbuf, 0x0FFF);
 
 		/* Exit if User Button is pressed */
 		if (hydrabus_ubtn()) {
@@ -537,38 +443,11 @@ int cmd_debug_test_rx(t_hydra_console *con, t_tokenline_parsed *p)
 		}
 		//get_char(con);
 	}
+	pool_free(inbuf);
 	return TRUE;
 }
 
-/*
- If used this function shall be called at least every 2^32 cycles (to avoid overflow)
- (2^32 cycles => 25.56 seconds @168MHz)
- Use this function if interruptions are enabled
-*/
-uint64_t get_cyclecounter64(void)
-{
-	uint32_t primask;
-	asm volatile ("mrs %0, PRIMASK" : "=r"(primask));
-	asm volatile ("cpsid i");  // Disable interrupts.
-	int64_t r = cyclecounter64;
-	r += DWTBase->CYCCNT - (uint32_t)(r);
-	cyclecounter64 = r;
-	asm volatile ("msr PRIMASK, %0" : : "r"(primask));  // Restore interrupts.
-	return r;
-}
-
-/*
- If used this function shall be called at least every 2^32 cycles (to avoid overflow)
- (2^32 cycles => 25.56 seconds @168MHz)
- Use this function if interruptions are disabled
-*/
-uint64_t get_cyclecounter64I(void)
-{
-	cyclecounter64 += DWTBase->CYCCNT - (uint32_t)(cyclecounter64);
-	return cyclecounter64;
-}
-
-static uint8_t hexchartonibble(char hex)
+uint8_t hexchartonibble(char hex)
 {
 	if (hex >= '0' && hex <= '9') return hex - '0';
 	if (hex >= 'a' && hex <='f') return hex - 'a' + 10;
@@ -576,7 +455,7 @@ static uint8_t hexchartonibble(char hex)
 	return 0;
 }
 
-static uint8_t hex2byte(char * hex)
+uint8_t hex2byte(char * hex)
 {
 	uint8_t val = 0;
 	val = (hexchartonibble(hex[0]) << 4);

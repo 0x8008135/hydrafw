@@ -38,8 +38,10 @@
 #endif
 #include "hydrabus/hydrabus_bbio.h"
 #include "hydrabus/hydrabus_sump.h"
+#include "hydrabus/hydrabus_serprog.h"
 
 #include "bsp.h"
+#include "bsp_print_dbg.h"
 
 #include "script.h"
 
@@ -56,11 +58,11 @@ extern t_token tl_tokens[];
 extern t_token_dict tl_dict[];
 
 /* Create tokenline objects for each console. */
-t_tokenline tl_con1;
-t_mode_config mode_con1 = { .proto={ .dev_num = 0 }, .cmd={ 0 } };
+t_tokenline tl_con1  __attribute__ ((section(".ram4")));
+t_mode_config mode_con1  __attribute__ ((section(".ram4"))) = { .proto={ .dev_num = 0 }, .cmd={ 0 } };
 
-t_tokenline tl_con2;
-t_mode_config mode_con2 = { .proto={ .dev_num = 0 }, .cmd={ 0 } };
+t_tokenline tl_con2  __attribute__ ((section(".ram4")));
+t_mode_config mode_con2  __attribute__ ((section(".ram4"))) = { .proto={ .dev_num = 0 }, .cmd={ 0 } };
 
 t_hydra_console consoles[] = {
 	{ .thread_name="console USB1", .sdu=&SDU1, .tl=&tl_con1, .mode = &mode_con1 },
@@ -98,6 +100,13 @@ THD_FUNCTION(console, arg)
 			if(i == 5) {
 				cprintf(con, "1ALS");
 				sump(con);
+			}
+			break;
+		/* SERPROG identification is 8*\x00, then \x10 */
+		/* Enter SERPROG mode automatically */
+		case 0x10:
+			if(i == 8) {
+				bbio_mode_serprog(con);
 			}
 			break;
 		default:
@@ -141,10 +150,19 @@ int main(void)
 
 	chSysInit();
 
-	scs_dwt_cycle_counter_enabled();
+	bsp_scs_dwt_cycle_counter_enabled();
+
+#ifdef MAKE_DEBUG
+	// set SWO on PB3
+	palSetPadMode(GPIOB, 3, PAL_MODE_ALTERNATE(0));
+	printf_dbg("DEBUG Trace started\n");
+#endif
 
 	/* Configure PA0 (UBTN), PA4 (ULED) and initialize the SD driver. */
 	hydrabus_init();
+
+	/* Initialize memory pool */
+	pool_init();
 
 	/*
 	 * Initializes a serial-over-USB CDC driver.

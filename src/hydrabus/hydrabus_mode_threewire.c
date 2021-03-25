@@ -21,14 +21,12 @@
 #include "hydrabus.h"
 #include "bsp.h"
 #include "bsp_gpio.h"
+#include "bsp_tim.h"
 #include "hydrabus_mode_threewire.h"
-#include "stm32f4xx_hal.h"
 #include <string.h>
 
 static int exec(t_hydra_console *con, t_tokenline_parsed *p, int token_pos);
 static int show(t_hydra_console *con, t_tokenline_parsed *p);
-
-static TIM_HandleTypeDef htim;
 
 static const char* str_prompt_threewire[] = {
 	"threewire1" PROMPT,
@@ -44,6 +42,7 @@ void threewire_init_proto_default(t_hydra_console *con)
 	proto->config.rawwire.dev_gpio_pull = MODE_CONFIG_DEV_GPIO_NOPULL;
 	proto->config.rawwire.dev_bit_lsb_msb = DEV_FIRSTBIT_MSB;
 	proto->config.rawwire.dev_speed = THREEWIRE_MAX_FREQ;
+	proto->config.rawwire.clock_polarity = 0;
 
 	proto->config.rawwire.clk_pin = 3;
 	proto->config.rawwire.sdi_pin = 4;
@@ -80,30 +79,15 @@ bool threewire_pin_init(t_hydra_console *con)
 void threewire_tim_init(t_hydra_console *con)
 {
 	mode_config_proto_t* proto = &con->mode->proto;
-	htim.Instance = TIM4;
 
-	htim.Init.Period = 42 - 1;
-	htim.Init.Prescaler = (THREEWIRE_MAX_FREQ/proto->config.rawwire.dev_speed) - 1;
-	htim.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
-	htim.Init.CounterMode = TIM_COUNTERMODE_UP;
-
-	HAL_TIM_Base_MspInit(&htim);
-	__TIM4_CLK_ENABLE();
-	HAL_TIM_Base_Init(&htim);
-	TIM4->SR &= ~TIM_SR_UIF;  //clear overflow flag
-	HAL_TIM_Base_Start(&htim);
+	bsp_tim_init(42, (THREEWIRE_MAX_FREQ/proto->config.rawwire.dev_speed), TIM_CLOCKDIVISION_DIV1, TIM_COUNTERMODE_UP);
 }
 
 void threewire_tim_set_prescaler(t_hydra_console *con)
 {
 	mode_config_proto_t* proto = &con->mode->proto;
 
-	HAL_TIM_Base_Stop(&htim);
-	HAL_TIM_Base_DeInit(&htim);
-	htim.Init.Prescaler = (THREEWIRE_MAX_FREQ/proto->config.rawwire.dev_speed) - 1;
-	HAL_TIM_Base_Init(&htim);
-	TIM4->SR &= ~TIM_SR_UIF;  //clear overflow flag
-	HAL_TIM_Base_Start(&htim);
+	bsp_tim_set_prescaler((THREEWIRE_MAX_FREQ/proto->config.rawwire.dev_speed));
 }
 
 inline void threewire_sdo_high(t_hydra_console *con)
@@ -121,25 +105,30 @@ inline void threewire_sdo_low(t_hydra_console *con)
 inline void threewire_clk_high(t_hydra_console *con)
 {
 	mode_config_proto_t* proto = &con->mode->proto;
-	while (!(TIM4->SR & TIM_SR_UIF)) {
-	}
+	bsp_tim_wait_irq();
 	bsp_gpio_set(BSP_GPIO_PORTB, proto->config.rawwire.clk_pin);
-	TIM4->SR &= ~TIM_SR_UIF;  //clear overflow flag
+	bsp_tim_clr_irq();
 }
 
 inline void threewire_clk_low(t_hydra_console *con)
 {
 	mode_config_proto_t* proto = &con->mode->proto;
-	while (!(TIM4->SR & TIM_SR_UIF)) {
-	}
+	bsp_tim_wait_irq();
 	bsp_gpio_clr(BSP_GPIO_PORTB, proto->config.rawwire.clk_pin);
-	TIM4->SR &= ~TIM_SR_UIF;  //clear overflow flag
+	bsp_tim_clr_irq();
 }
 
 inline void threewire_clock(t_hydra_console *con)
 {
-	threewire_clk_high(con);
-	threewire_clk_low(con);
+	mode_config_proto_t* proto = &con->mode->proto;
+
+	if (proto->config.rawwire.clock_polarity == 0) {
+		threewire_clk_high(con);
+		threewire_clk_low(con);
+	} else {
+		threewire_clk_low(con);
+		threewire_clk_high(con);
+	}
 }
 
 uint8_t threewire_send_bit(t_hydra_console *con, uint8_t bit)
@@ -162,9 +151,15 @@ uint8_t threewire_read_bit_clock(t_hydra_console *con)
 {
 	mode_config_proto_t* proto = &con->mode->proto;
 	uint8_t bit;
-	threewire_clk_high(con);
-	bit = bsp_gpio_pin_read(BSP_GPIO_PORTB, proto->config.rawwire.sdi_pin);
-	threewire_clk_low(con);
+	if (proto->config.rawwire.clock_polarity == 0) {
+		threewire_clk_high(con);
+		bit = bsp_gpio_pin_read(BSP_GPIO_PORTB, proto->config.rawwire.sdi_pin);
+		threewire_clk_low(con);
+	} else {
+		threewire_clk_low(con);
+		bit = bsp_gpio_pin_read(BSP_GPIO_PORTB, proto->config.rawwire.sdi_pin);
+		threewire_clk_high(con);
+	}
 	return bit;
 }
 
@@ -286,7 +281,7 @@ static int exec(t_hydra_console *con, t_tokenline_parsed *p, int token_pos)
 {
 	mode_config_proto_t* proto = &con->mode->proto;
 	float arg_float;
-	int t;
+	int t, arg_int;
 
 	for (t = token_pos; p->tokens[t]; t++) {
 		switch (p->tokens[t]) {
@@ -321,6 +316,21 @@ static int exec(t_hydra_console *con, t_tokenline_parsed *p, int token_pos)
 			} else {
 				proto->config.rawwire.dev_speed = (int)arg_float;
 				threewire_tim_set_prescaler(con);
+			}
+			break;
+		case T_POLARITY:
+			t += 2;
+			memcpy(&arg_int, p->buf + p->tokens[t], sizeof(uint32_t));
+			if (arg_int == 0 || arg_int == 1) {
+				proto->config.rawwire.clock_polarity = (int)arg_int;
+				if (arg_int == 0) {
+					threewire_clk_low(con);
+				} else {
+					threewire_clk_high(con);
+				}
+			} else {
+				cprintf(con, "Polarity must be 0 or 1.\r\n");
+				return t;
 			}
 			break;
 		default:
@@ -408,7 +418,7 @@ static uint32_t dump(t_hydra_console *con, uint8_t *rx_data, uint8_t nb_data)
 void threewire_cleanup(t_hydra_console *con)
 {
 	(void)con;
-	HAL_TIM_Base_Stop(&htim);
+	bsp_tim_stop();
 }
 
 static int show(t_hydra_console *con, t_tokenline_parsed *p)

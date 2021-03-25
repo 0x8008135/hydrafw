@@ -20,7 +20,6 @@
 #include "common.h"
 #include "tokenline.h"
 #include "hydrabus_bbio.h"
-#include "stm32f4xx_hal.h"
 #include <stdlib.h>
 #include <string.h>
 #include <ctype.h>
@@ -38,13 +37,21 @@
 #include "hydrabus_bbio_adc.h"
 #include "hydrabus_bbio_freq.h"
 #include "hydrabus_bbio_aux.h"
+#include "hydrabus_bbio_mmc.h"
+#ifdef HYDRANFC
+#include "hydranfc_bbio_reader.h"
+#endif
 
 int cmd_bbio(t_hydra_console *con)
 {
+	mode_config_proto_t* proto = &con->mode->proto;
 	uint8_t bbio_mode;
 
 	// Init auxiliary pins
-	bbio_aux_init_proto_default(con);
+	// output no pullup on PC4 - AUX[0]
+	// input no pullup on PC5-7 - AUX[1-3]
+	proto->aux_config = 0b00001110;
+	bbio_aux_mode_set(con);
 
 	cprint(con, "BBIO1", 5);
 
@@ -81,6 +88,14 @@ int cmd_bbio(t_hydra_console *con)
 				break;
 			case BBIO_SMARTCARD:
 				bbio_mode_smartcard(con);
+				break;
+#ifdef HYDRANFC
+			case BBIO_NFC_READER:
+				bbio_mode_hydranfc_reader(con);
+				break;
+#endif
+			case BBIO_MMC:
+				bbio_mode_mmc(con);
 				break;
 			case BBIO_RESET_HW:
 				/* Needed for flashrom detection */

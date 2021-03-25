@@ -33,9 +33,6 @@
 
 #include "script.h"
 
-static uint8_t outbuf[IN_OUT_BUF_SIZE+8];
-static uint8_t inbuf[IN_OUT_BUF_SIZE+8];
-
 /* FS object.*/
 extern FATFS SDC_FS;
 /* FS Root */
@@ -264,6 +261,7 @@ int cmd_sd_cat(t_hydra_console *con, t_tokenline_parsed *p)
 	bool hex;
 	uint32_t str_offset, offset, filelen;
 	uint32_t cnt;
+	uint8_t *inbuf, *outbuf;
 	FRESULT err;
 	FIL fp;
 
@@ -293,6 +291,15 @@ int cmd_sd_cat(t_hydra_console *con, t_tokenline_parsed *p)
 		return FALSE;
 	}
 
+	outbuf = pool_alloc_bytes(IN_OUT_BUF_SIZE+8);
+	inbuf = pool_alloc_bytes(IN_OUT_BUF_SIZE+8);
+
+	if(inbuf == 0 || outbuf == 0) {
+		pool_free(inbuf);
+		pool_free(outbuf);
+		return FALSE;
+	}
+
 	hex = p->tokens[1] == T_HD;
 	offset = 0;
 	while(filelen) {
@@ -318,6 +325,8 @@ int cmd_sd_cat(t_hydra_console *con, t_tokenline_parsed *p)
 			cprint(con, (char *)inbuf, cnt);
 		}
 	}
+	pool_free(inbuf);
+	pool_free(outbuf);
 	if (!hex)
 		cprintf(con, "\r\n");
 
@@ -330,12 +339,22 @@ int cmd_sd_cat(t_hydra_console *con, t_tokenline_parsed *p)
 int cmd_sd_erase(t_hydra_console *con, t_tokenline_parsed *p)
 {
 	uint32_t i = 0;
+	uint8_t *inbuf, *outbuf;
 
 	if (p->tokens[2] == 0) {
 		cprintf(con, "This will destroy the contents of the SD card. "
 			"Confirm with 'sd erase really'.\r\n");
 		return TRUE;
 	} else if (p->tokens[2] != T_REALLY || p->tokens[3] != 0) {
+		return FALSE;
+	}
+
+	outbuf = pool_alloc_bytes(IN_OUT_BUF_SIZE+8);
+	inbuf = pool_alloc_bytes(IN_OUT_BUF_SIZE+8);
+
+	if(inbuf == 0 || outbuf == 0) {
+		pool_free(inbuf);
+		pool_free(outbuf);
 		return FALSE;
 	}
 
@@ -350,6 +369,8 @@ int cmd_sd_erase(t_hydra_console *con, t_tokenline_parsed *p)
 		if (sdcRead(&SDCD1, 0, inbuf, 1)) {
 			cprintf(con, "sdcRead KO\r\n");
 			umount();
+			pool_free(inbuf);
+			pool_free(outbuf);
 			return FALSE;
 		}
 		cprintf(con, " OK\r\n");
@@ -360,16 +381,22 @@ int cmd_sd_erase(t_hydra_console *con, t_tokenline_parsed *p)
 		if (sdcRead(&SDCD1, 0, inbuf + 1, 1)) {
 			cprintf(con, "sdcRead KO\r\n");
 			umount();
+			pool_free(inbuf);
+			pool_free(outbuf);
 			return FALSE;
 		}
 		if (sdcRead(&SDCD1, 0, inbuf + 2, 1)) {
 			cprintf(con, "sdcRead KO\r\n");
 			umount();
+			pool_free(inbuf);
+			pool_free(outbuf);
 			return FALSE;
 		}
 		if (sdcRead(&SDCD1, 0, inbuf + 3, 1)) {
 			cprintf(con, "sdcRead KO\r\n");
 			umount();
+			pool_free(inbuf);
+			pool_free(outbuf);
 			return FALSE;
 		}
 		cprintf(con, " OK\r\n");
@@ -377,12 +404,15 @@ int cmd_sd_erase(t_hydra_console *con, t_tokenline_parsed *p)
 
 		cprintf(con, "Multiple aligned reads...");
 		chThdSleepMilliseconds(10);
-		fillbuffers(0x55);
+		fillbuffer(0x55, inbuf);
+		fillbuffer(0x55, outbuf);
 
 		/* fill reference buffer from SD card */
 		if (sdcRead(&SDCD1, 0, inbuf, SDC_BURST_SIZE)) {
 			cprintf(con, "sdcRead KO\r\n");
 			umount();
+			pool_free(inbuf);
+			pool_free(outbuf);
 			return FALSE;
 		}
 		cprintf(con, "\r\n.");
@@ -391,11 +421,15 @@ int cmd_sd_erase(t_hydra_console *con, t_tokenline_parsed *p)
 			if (sdcRead(&SDCD1, 0, outbuf, SDC_BURST_SIZE)) {
 				cprintf(con, "sdcRead KO\r\n");
 				umount();
+				pool_free(inbuf);
+				pool_free(outbuf);
 				return FALSE;
 			}
 			if (memcmp(inbuf, outbuf, SDC_BURST_SIZE * MMCSD_BLOCK_SIZE) != 0) {
 				cprintf(con, "memcmp KO\r\n");
 				umount();
+				pool_free(inbuf);
+				pool_free(outbuf);
 				return FALSE;
 			}
 
@@ -406,11 +440,14 @@ int cmd_sd_erase(t_hydra_console *con, t_tokenline_parsed *p)
 
 		cprintf(con, "Multiple unaligned reads...");
 		chThdSleepMilliseconds(10);
-		fillbuffers(0x55);
+		fillbuffer(0x55, inbuf);
+		fillbuffer(0x55, outbuf);
 		/* fill reference buffer from SD card */
 		if (sdcRead(&SDCD1, 0, inbuf + 1, SDC_BURST_SIZE)) {
 			cprintf(con, "sdcRead KO\r\n");
 			umount();
+			pool_free(inbuf);
+			pool_free(outbuf);
 			return FALSE;
 		}
 
@@ -418,11 +455,15 @@ int cmd_sd_erase(t_hydra_console *con, t_tokenline_parsed *p)
 			if (sdcRead(&SDCD1, 0, outbuf + 1, SDC_BURST_SIZE)) {
 				cprintf(con, "sdcRead KO\r\n");
 				umount();
+				pool_free(inbuf);
+				pool_free(outbuf);
 				return FALSE;
 			}
 			if (memcmp(inbuf, outbuf, SDC_BURST_SIZE * MMCSD_BLOCK_SIZE) != 0) {
 				cprintf(con, "memcmp KO\r\n");
 				umount();
+				pool_free(inbuf);
+				pool_free(outbuf);
 				return FALSE;
 			}
 		}
@@ -436,17 +477,23 @@ int cmd_sd_erase(t_hydra_console *con, t_tokenline_parsed *p)
 		if (sdcWrite(&SDCD1, 0, inbuf, 1)) {
 			cprintf(con, "sdcWrite KO\r\n");
 			umount();
+			pool_free(inbuf);
+			pool_free(outbuf);
 			return FALSE;
 		}
 		fillbuffer(0, outbuf);
 		if (sdcRead(&SDCD1, 0, outbuf, 1)) {
 			cprintf(con, "sdcRead KO\r\n");
 			umount();
+			pool_free(inbuf);
+			pool_free(outbuf);
 			return FALSE;
 		}
 		if (memcmp(inbuf, outbuf, MMCSD_BLOCK_SIZE) != 0) {
 			cprintf(con, "memcmp KO\r\n");
 			umount();
+			pool_free(inbuf);
+			pool_free(outbuf);
 			return FALSE;
 		}
 		cprintf(con, " OK\r\n");
@@ -457,17 +504,23 @@ int cmd_sd_erase(t_hydra_console *con, t_tokenline_parsed *p)
 		if (sdcWrite(&SDCD1, 0, inbuf+1, 1)) {
 			cprintf(con, "sdcWrite KO\r\n");
 			umount();
+			pool_free(inbuf);
+			pool_free(outbuf);
 			return FALSE;
 		}
 		fillbuffer(0, outbuf);
 		if (sdcRead(&SDCD1, 0, outbuf+1, 1)) {
 			cprintf(con, "sdcRead KO\r\n");
 			umount();
+			pool_free(inbuf);
+			pool_free(outbuf);
 			return FALSE;
 		}
 		if (memcmp(inbuf+1, outbuf+1, MMCSD_BLOCK_SIZE) != 0) {
 			cprintf(con, "memcmp KO\r\n");
 			umount();
+			pool_free(inbuf);
+			pool_free(outbuf);
 			return FALSE;
 		}
 		cprintf(con, " OK\r\n");
@@ -477,6 +530,8 @@ int cmd_sd_erase(t_hydra_console *con, t_tokenline_parsed *p)
 		if(badblocks(0x10000, 0x11000, SDC_BURST_SIZE, 0xAA)) {
 			cprintf(con, "badblocks KO\r\n");
 			umount();
+			pool_free(inbuf);
+			pool_free(outbuf);
 			return FALSE;
 		}
 		cprintf(con, " OK\r\n");
@@ -500,6 +555,8 @@ int cmd_sd_erase(t_hydra_console *con, t_tokenline_parsed *p)
 		if (status != 0) {
 			cprintf(con, "f_mount err\r\n");
 			umount();
+			pool_free(inbuf);
+			pool_free(outbuf);
 			return FALSE;
 		} else {
 			cprintf(con, "OK\r\n");
@@ -508,10 +565,12 @@ int cmd_sd_erase(t_hydra_console *con, t_tokenline_parsed *p)
 		/* DESTRUCTIVE TEST START */
 		cprintf(con, "Formatting... ");
 		chThdSleepMilliseconds(10);
-		err = f_mkfs("", FM_ANY, 0, g_sbuf, NB_SBUFFER);
+		err = f_mkfs("", FM_ANY, 0, outbuf, IN_OUT_BUF_SIZE);
 		if (err != FR_OK) {
 			cprintf(con, "f_mkfs err:%d\r\n", err);
 			umount();
+			pool_free(inbuf);
+			pool_free(outbuf);
 			return FALSE;
 		} else {
 			cprintf(con, "OK\r\n");
@@ -524,6 +583,8 @@ int cmd_sd_erase(t_hydra_console *con, t_tokenline_parsed *p)
 		if (err != FR_OK) {
 			cprintf(con, "f_getfree err:%d\r\n", err);
 			umount();
+			pool_free(inbuf);
+			pool_free(outbuf);
 			return FALSE;
 		}
 		cprintf(con, "OK\r\n");
@@ -539,6 +600,8 @@ int cmd_sd_erase(t_hydra_console *con, t_tokenline_parsed *p)
 		if (err != FR_OK) {
 			cprintf(con, "f_open err:%d\r\n", err);
 			umount();
+			pool_free(inbuf);
+			pool_free(outbuf);
 			return FALSE;
 		}
 		cprintf(con, "OK\r\n");
@@ -548,6 +611,8 @@ int cmd_sd_erase(t_hydra_console *con, t_tokenline_parsed *p)
 		if (err != FR_OK) {
 			cprintf(con, "f_write err:%d\r\n", err);
 			umount();
+			pool_free(inbuf);
+			pool_free(outbuf);
 			return FALSE;
 		} else
 			cprintf(con, "OK\r\n");
@@ -557,6 +622,8 @@ int cmd_sd_erase(t_hydra_console *con, t_tokenline_parsed *p)
 		if (err != FR_OK) {
 			cprintf(con, "f_close err:%d\r\n", err);
 			umount();
+			pool_free(inbuf);
+			pool_free(outbuf);
 			return FALSE;
 		} else
 			cprintf(con, "OK\r\n");
@@ -567,6 +634,8 @@ int cmd_sd_erase(t_hydra_console *con, t_tokenline_parsed *p)
 		if (err != FR_OK) {
 			cprintf(con, "f_open err:%d\r\n", err);
 			umount();
+			pool_free(inbuf);
+			pool_free(outbuf);
 			return FALSE;
 		}
 
@@ -574,11 +643,15 @@ int cmd_sd_erase(t_hydra_console *con, t_tokenline_parsed *p)
 		if (err != FR_OK) {
 			cprintf(con, "f_read KO\r\n");
 			umount();
+			pool_free(inbuf);
+			pool_free(outbuf);
 			return FALSE;
 		} else {
 			if (memcmp(teststring, inbuf, sizeof(teststring)) != 0) {
 				cprintf(con, "memcmp KO\r\n");
 				umount();
+				pool_free(inbuf);
+				pool_free(outbuf);
 				return FALSE;
 			} else {
 				cprintf(con, "OK\r\n");
@@ -590,6 +663,8 @@ int cmd_sd_erase(t_hydra_console *con, t_tokenline_parsed *p)
 		if (err != FR_OK) {
 			cprintf(con, "f_unlink err:%d\r\n", err);
 			umount();
+			pool_free(inbuf);
+			pool_free(outbuf);
 			return FALSE;
 		}
 
@@ -602,6 +677,8 @@ int cmd_sd_erase(t_hydra_console *con, t_tokenline_parsed *p)
 		if (sdcDisconnect(&SDCD1)) {
 			cprintf(con, "sdcDisconnect KO\r\n");
 			umount();
+			pool_free(inbuf);
+			pool_free(outbuf);
 			return FALSE;
 		}
 		cprintf(con, " OK\r\n");
@@ -611,7 +688,8 @@ int cmd_sd_erase(t_hydra_console *con, t_tokenline_parsed *p)
 
 		umount();
 	}
-
+	pool_free(inbuf);
+	pool_free(outbuf);
 	return TRUE;
 }
 
@@ -935,6 +1013,7 @@ static void cmd_show_sd_csd(t_hydra_console *con, uint8_t *csd)
 
 int cmd_show_sd(t_hydra_console *con)
 {
+	uint8_t buf[16];
 	int i;
 	char *s;
 

@@ -2,6 +2,7 @@
  * HydraBus/HydraNFC
  *
  * Copyright (C) 2014-2015 Benjamin VERNOUX
+ * Copyright (C) 2015 Nicolas CHAUVEAU
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,6 +16,8 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+
+#include "file_fmt_pcap.h"
 
 #include <stdarg.h>
 #include <stdio.h> /* sprintf */
@@ -34,6 +37,7 @@
 #include "common.h"
 #include "microsd.h"
 #include "ff.h"
+#include "bsp.h"
 #include "bsp_uart.h"
 
 /* Disable D4 & TST output pin (used only for debug purpose) */
@@ -91,9 +95,10 @@ filename_t write_filename;
 #define SPI_RX_DMA_SIZE (4)
 uint8_t spi_rx_dma_buf[2][SPI_RX_DMA_SIZE+12] __attribute__ ((aligned (16)));
 uint8_t htoa[16] = {'0','1','2','3','4','5','6','7','8','9','a','b','c','d','e','f'};
-uint8_t tmp_buf[16];
 uint8_t irq_no;
 volatile int irq_sampling = 0;
+uint8_t * nfc_sniffer_buffer;
+uint32_t nfc_sniffer_index;
 
 static uint32_t old_u32_data, u32_data, old_data_bit;
 
@@ -112,12 +117,16 @@ static const SPIConfig spi1cfg = {
 	0 /* CR2 Register */
 };
 
+uint8_t sniff_pcap_output;
+
+FIL log_file;
+
 #define CountLeadingZero(x) (__CLZ(x))
 #define SWAP32(x) (__REV(x))
 
 uint8_t* sniffer_get_buffer(void)
 {
-	return &g_sbuf[0];
+	return &nfc_sniffer_buffer[0];
 }
 
 uint32_t sniffer_get_buffer_max_size(void)
@@ -127,7 +136,7 @@ uint32_t sniffer_get_buffer_max_size(void)
 
 uint32_t sniffer_get_size(void)
 {
-	return g_sbuf_idx;
+	return nfc_sniffer_index;
 }
 
 void initSPI1(void)
@@ -214,6 +223,14 @@ void terminate_sniff_nfc(void)
 
 static void init_sniff_nfc(INIT_NFC_PROTOCOL iso_proto)
 {
+	uint8_t tmp_buf[16];
+	nfc_sniffer_buffer = pool_alloc_bytes(NB_SBUFFER);
+
+	if(nfc_sniffer_buffer == 0) {
+		tprintf("Error, unable to get buffer space.\r\n");
+		return;
+	}
+
 	tprintf("TRF7970A chipset init start\r\n");
 
 	/* Init TRF797x */
@@ -351,44 +368,76 @@ void sniff_log(void)
 	terminate_sniff_nfc();
 	D4_OFF;
 	D5_OFF;
+// FIL is a huge struct with 512+ bytes in non-tiny fs. Not any thread's stack can handle this.
+//	FIL log_file;
+	tprintf("Logging...\r\n");
 
-	if ( file_create_write(sniffer_get_buffer(), sniffer_get_size(), "nfc_sniff_", (char *)&write_filename) == FALSE ) {
-		/* Display sniffed data */
-		tprintf("Sniffed data:\r\n");
-		tprint_str( (char*)sniffer_get_buffer(), sniffer_get_size() );
-		tprintf("\r\n");
-		tprintf("\r\n");
-
-		tprintf("write_file %s buffer=0x%08LX size=%ld bytes\r\n",
-			&write_filename.filename[2], sniffer_get_buffer(), sniffer_get_size());
-		tprintf("write_file() error\r\n");
-		tprintf("\r\n");
-
-		/* Error Red LED blink */
-		for(i=0; i<4; i++) {
-			D5_ON;
-			DelayUs(50000);
-			D5_OFF;
-			DelayUs(50000);
+	if (sniff_pcap_output) {
+		if (file_fmt_flush_close(&log_file, sniffer_get_buffer(),
+				sniffer_get_size())
+				< 0) {
+			// TODO implement terminal log out
+			tprintf("Sniffed data were not saved!\r\n");
+			/* Error Red LED blink */
+			for(i=0; i<4; i++) {
+				D5_ON;
+				DelayUs(50000);
+				D5_OFF;
+				DelayUs(50000);
+			}
 		}
-	} else {
-		/* Display sniffed data */
-		tprintf("Sniffed data:\r\n");
-		tprint_str( (char*)sniffer_get_buffer(), sniffer_get_size() );
-		tprintf("\r\n");
-
-		tprintf("write_file %s buffer=0x%08LX size=%ld bytes\r\n",
-			&write_filename.filename[2], sniffer_get_buffer(), sniffer_get_size());
-		tprintf("write_file() OK\r\n");
-
-		/* All is OK Green LED bink */
-		for(i=0; i<4; i++) {
-			D4_ON;
-			DelayUs(50000);
-			D4_OFF;
-			DelayUs(50000);
+		else {
+			// TODO implement terminal log out
+			tprintf("Sniffed data were successfully processed and saved!\r\n");
+			/* All is OK Green LED bink */
+			for(i=0; i<4; i++) {
+				D4_ON;
+				DelayUs(50000);
+				D4_OFF;
+				DelayUs(50000);
+			}
 		}
 	}
+	else {
+		if ( file_create_write(&log_file, sniffer_get_buffer(), sniffer_get_size(), "nfc_sniff_", (char *)&write_filename) == FALSE ) {
+			/* Display sniffed data */
+			tprintf("Sniffed data:\r\n");
+			tprint_str( (char*)sniffer_get_buffer(), sniffer_get_size() );
+			tprintf("\r\n");
+			tprintf("\r\n");
+
+			tprintf("write_file %s buffer=0x%08LX size=%ld bytes\r\n",
+				&write_filename.filename[2], sniffer_get_buffer(), sniffer_get_size());
+			tprintf("write_file() error\r\n");
+			tprintf("\r\n");
+
+			/* Error Red LED blink */
+			for(i=0; i<4; i++) {
+				D5_ON;
+				DelayUs(50000);
+				D5_OFF;
+				DelayUs(50000);
+			}
+		} else {
+			/* Display sniffed data */
+			tprintf("Sniffed data:\r\n");
+			tprint_str( (char*)sniffer_get_buffer(), sniffer_get_size() );
+			tprintf("\r\n");
+
+			tprintf("write_file %s buffer=0x%08LX size=%ld bytes\r\n",
+				&write_filename.filename[2], sniffer_get_buffer(), sniffer_get_size());
+			tprintf("write_file() OK\r\n");
+
+			/* All is OK Green LED bink */
+			for(i=0; i<4; i++) {
+				D4_ON;
+				DelayUs(50000);
+				D4_OFF;
+				DelayUs(50000);
+			}
+		}
+	}
+
 	D4_OFF;
 	D5_OFF;
 }
@@ -450,30 +499,30 @@ void sniff_write_pcd(void)
 	uint32_t i, nb_cycles;
 	uint8_t val;
 
-	i = g_sbuf_idx;
-	g_sbuf[i+0] = '\r';
-	g_sbuf[i+1] = '\n';
+	i = nfc_sniffer_index;
+	nfc_sniffer_buffer[i+0] = '\r';
+	nfc_sniffer_buffer[i+1] = '\n';
 
-	nb_cycles = get_cyclecounter();
+	nb_cycles = bsp_get_cyclecounter();
 	val = ((nb_cycles & 0xFF000000) >> 24);
-	g_sbuf[i+2] = htoa[(val & 0xF0) >> 4];
-	g_sbuf[i+3] = htoa[(val & 0x0F)];
+	nfc_sniffer_buffer[i+2] = htoa[(val & 0xF0) >> 4];
+	nfc_sniffer_buffer[i+3] = htoa[(val & 0x0F)];
 	val = ((nb_cycles & 0x00FF0000) >> 16);
-	g_sbuf[i+4] = htoa[(val & 0xF0) >> 4];
-	g_sbuf[i+5] = htoa[(val & 0x0F)];
+	nfc_sniffer_buffer[i+4] = htoa[(val & 0xF0) >> 4];
+	nfc_sniffer_buffer[i+5] = htoa[(val & 0x0F)];
 	val = ((nb_cycles & 0x0000FF00) >> 8);
-	g_sbuf[i+6] = htoa[(val & 0xF0) >> 4];
-	g_sbuf[i+7] = htoa[(val & 0x0F)];
+	nfc_sniffer_buffer[i+6] = htoa[(val & 0xF0) >> 4];
+	nfc_sniffer_buffer[i+7] = htoa[(val & 0x0F)];
 	val = (nb_cycles & 0x000000FF);
-	g_sbuf[i+8] = htoa[(val & 0xF0) >> 4];
-	g_sbuf[i+9] = htoa[(val & 0x0F)];
-	g_sbuf[i+10] = '\t';
+	nfc_sniffer_buffer[i+8] = htoa[(val & 0xF0) >> 4];
+	nfc_sniffer_buffer[i+9] = htoa[(val & 0x0F)];
+	nfc_sniffer_buffer[i+10] = '\t';
 
-	g_sbuf[i+11] = 'R';
-	g_sbuf[i+12] = 'D';
-	g_sbuf[i+13] = 'R';
-	g_sbuf[i+14] = '\t';
-	g_sbuf_idx +=15;
+	nfc_sniffer_buffer[i+11] = 'R';
+	nfc_sniffer_buffer[i+12] = 'D';
+	nfc_sniffer_buffer[i+13] = 'R';
+	nfc_sniffer_buffer[i+14] = '\t';
+	nfc_sniffer_index +=15;
 }
 
 __attribute__ ((always_inline)) static inline
@@ -485,30 +534,30 @@ void sniff_write_picc(void)
 	uint32_t i, nb_cycles;
 	uint8_t val;
 
-	i = g_sbuf_idx;
-	g_sbuf[i+0] = '\r';
-	g_sbuf[i+1] = '\n';
+	i = nfc_sniffer_index;
+	nfc_sniffer_buffer[i+0] = '\r';
+	nfc_sniffer_buffer[i+1] = '\n';
 
-	nb_cycles = get_cyclecounter();
+	nb_cycles = bsp_get_cyclecounter();
 	val = ((nb_cycles & 0xFF000000) >> 24);
-	g_sbuf[i+2] = htoa[(val & 0xF0) >> 4];
-	g_sbuf[i+3] = htoa[(val & 0x0F)];
+	nfc_sniffer_buffer[i+2] = htoa[(val & 0xF0) >> 4];
+	nfc_sniffer_buffer[i+3] = htoa[(val & 0x0F)];
 	val = ((nb_cycles & 0x00FF0000) >> 16);
-	g_sbuf[i+4] = htoa[(val & 0xF0) >> 4];
-	g_sbuf[i+5] = htoa[(val & 0x0F)];
+	nfc_sniffer_buffer[i+4] = htoa[(val & 0xF0) >> 4];
+	nfc_sniffer_buffer[i+5] = htoa[(val & 0x0F)];
 	val = ((nb_cycles & 0x0000FF00) >> 8);
-	g_sbuf[i+6] = htoa[(val & 0xF0) >> 4];
-	g_sbuf[i+7] = htoa[(val & 0x0F)];
+	nfc_sniffer_buffer[i+6] = htoa[(val & 0xF0) >> 4];
+	nfc_sniffer_buffer[i+7] = htoa[(val & 0x0F)];
 	val = (nb_cycles & 0x000000FF);
-	g_sbuf[i+8] = htoa[(val & 0xF0) >> 4];
-	g_sbuf[i+9] = htoa[(val & 0x0F)];
-	g_sbuf[i+10] = '\t';
+	nfc_sniffer_buffer[i+8] = htoa[(val & 0xF0) >> 4];
+	nfc_sniffer_buffer[i+9] = htoa[(val & 0x0F)];
+	nfc_sniffer_buffer[i+10] = '\t';
 
-	g_sbuf[i+11] = 'T';
-	g_sbuf[i+12] = 'A';
-	g_sbuf[i+13] = 'G';
-	g_sbuf[i+14] = '\t';
-	g_sbuf_idx +=15;
+	nfc_sniffer_buffer[i+11] = 'T';
+	nfc_sniffer_buffer[i+12] = 'A';
+	nfc_sniffer_buffer[i+13] = 'G';
+	nfc_sniffer_buffer[i+14] = '\t';
+	nfc_sniffer_index +=15;
 }
 
 __attribute__ ((always_inline)) static inline
@@ -526,108 +575,30 @@ void sniff_write_unknown_protocol(uint8_t data)
 	uint32_t i, nb_cycles;
 	uint8_t val;
 
-	i = g_sbuf_idx;
-	g_sbuf[i+0] = '\r';
-	g_sbuf[i+1] = '\n';
+	i = nfc_sniffer_index;
+	nfc_sniffer_buffer[i+0] = '\r';
+	nfc_sniffer_buffer[i+1] = '\n';
 
-	nb_cycles = get_cyclecounter();
+	nb_cycles = bsp_get_cyclecounter();
 	val = ((nb_cycles & 0xFF000000) >> 24);
-	g_sbuf[i+2] = htoa[(val & 0xF0) >> 4];
-	g_sbuf[i+3] = htoa[(val & 0x0F)];
+	nfc_sniffer_buffer[i+2] = htoa[(val & 0xF0) >> 4];
+	nfc_sniffer_buffer[i+3] = htoa[(val & 0x0F)];
 	val = ((nb_cycles & 0x00FF0000) >> 16);
-	g_sbuf[i+4] = htoa[(val & 0xF0) >> 4];
-	g_sbuf[i+5] = htoa[(val & 0x0F)];
+	nfc_sniffer_buffer[i+4] = htoa[(val & 0xF0) >> 4];
+	nfc_sniffer_buffer[i+5] = htoa[(val & 0x0F)];
 	val = ((nb_cycles & 0x0000FF00) >> 8);
-	g_sbuf[i+6] = htoa[(val & 0xF0) >> 4];
-	g_sbuf[i+7] = htoa[(val & 0x0F)];
+	nfc_sniffer_buffer[i+6] = htoa[(val & 0xF0) >> 4];
+	nfc_sniffer_buffer[i+7] = htoa[(val & 0x0F)];
 	val = (nb_cycles & 0x000000FF);
-	g_sbuf[i+8] = htoa[(val & 0xF0) >> 4];
-	g_sbuf[i+9] = htoa[(val & 0x0F)];
-	g_sbuf[i+10] = '\t';
+	nfc_sniffer_buffer[i+8] = htoa[(val & 0xF0) >> 4];
+	nfc_sniffer_buffer[i+9] = htoa[(val & 0x0F)];
+	nfc_sniffer_buffer[i+10] = '\t';
 
-	g_sbuf[i+11] = 'U';
-	g_sbuf[i+12] = htoa[(data & 0xF0) >> 4];
-	g_sbuf[i+13] = htoa[(data & 0x0F)];
-	g_sbuf[i+14] = '\t';
-	g_sbuf_idx +=15;
-}
-
-__attribute__ ((always_inline)) static inline
-void sniff_write_eof_protocol(uint32_t timestamp_nb_cycles)
-{
-	uint32_t i, nb_cycles;
-	uint8_t val;
-	uint8_t data_buf[1];
-	uint8_t data;
-
-	data_buf[0] = RSSI_LEVELS;
-	Trf797xReadSingle(data_buf, 1);
-	data = data_buf[0];
-
-	i = g_sbuf_idx;
-	g_sbuf[i+0] = '\r';
-	g_sbuf[i+1] = '\n';
-
-	nb_cycles = timestamp_nb_cycles;
-	val = ((nb_cycles & 0xFF000000) >> 24);
-	g_sbuf[i+2] = htoa[(val & 0xF0) >> 4];
-	g_sbuf[i+3] = htoa[(val & 0x0F)];
-	val = ((nb_cycles & 0x00FF0000) >> 16);
-	g_sbuf[i+4] = htoa[(val & 0xF0) >> 4];
-	g_sbuf[i+5] = htoa[(val & 0x0F)];
-	val = ((nb_cycles & 0x0000FF00) >> 8);
-	g_sbuf[i+6] = htoa[(val & 0xF0) >> 4];
-	g_sbuf[i+7] = htoa[(val & 0x0F)];
-	val = (nb_cycles & 0x000000FF);
-	g_sbuf[i+8] = htoa[(val & 0xF0) >> 4];
-	g_sbuf[i+9] = htoa[(val & 0x0F)];
-	g_sbuf[i+10] = '\t';
-
-	g_sbuf[i+11] = 'R';
-	g_sbuf[i+12] = htoa[(data & 0xF0) >> 4];
-	g_sbuf[i+13] = htoa[(data & 0x0F)];
-	g_sbuf[i+14] = '\t';
-
-	g_sbuf_idx +=15;
-}
-
-__attribute__ ((always_inline)) static inline
-void sniff_write_timestamp(uint32_t timestamp_nb_cycles)
-{
-	uint32_t i, nb_cycles;
-	uint8_t val;
-	uint8_t data_buf[1];
-	uint8_t data;
-
-	data_buf[0] = RSSI_LEVELS;
-	Trf797xReadSingle(data_buf, 1);
-	data = data_buf[0];
-
-	i = g_sbuf_idx;
-	g_sbuf[i+0] = '\r';
-	g_sbuf[i+1] = '\n';
-
-	nb_cycles = timestamp_nb_cycles;
-	val = ((nb_cycles & 0xFF000000) >> 24);
-	g_sbuf[i+2] = htoa[(val & 0xF0) >> 4];
-	g_sbuf[i+3] = htoa[(val & 0x0F)];
-	val = ((nb_cycles & 0x00FF0000) >> 16);
-	g_sbuf[i+4] = htoa[(val & 0xF0) >> 4];
-	g_sbuf[i+5] = htoa[(val & 0x0F)];
-	val = ((nb_cycles & 0x0000FF00) >> 8);
-	g_sbuf[i+6] = htoa[(val & 0xF0) >> 4];
-	g_sbuf[i+7] = htoa[(val & 0x0F)];
-	val = (nb_cycles & 0x000000FF);
-	g_sbuf[i+8] = htoa[(val & 0xF0) >> 4];
-	g_sbuf[i+9] = htoa[(val & 0x0F)];
-	g_sbuf[i+10] = '\t';
-
-	g_sbuf[i+11] = 'R';
-	g_sbuf[i+12] = htoa[(data & 0xF0) >> 4];
-	g_sbuf[i+13] = htoa[(data & 0x0F)];
-	g_sbuf[i+14] = '\t';
-
-	g_sbuf_idx +=15;
+	nfc_sniffer_buffer[i+11] = 'U';
+	nfc_sniffer_buffer[i+12] = htoa[(data & 0xF0) >> 4];
+	nfc_sniffer_buffer[i+13] = htoa[(data & 0x0F)];
+	nfc_sniffer_buffer[i+14] = '\t';
+	nfc_sniffer_index +=15;
 }
 
 __attribute__ ((always_inline)) static inline
@@ -636,24 +607,24 @@ void sniff_write_frameduration(uint32_t timestamp_nb_cycles)
 	uint32_t i, nb_cycles;
 	uint8_t val;
 
-	i = g_sbuf_idx;
-	g_sbuf[i+0] = '\t';
+	i = nfc_sniffer_index;
+	nfc_sniffer_buffer[i+0] = '\t';
 
 	nb_cycles = timestamp_nb_cycles;
 	val = ((nb_cycles & 0xFF000000) >> 24);
-	g_sbuf[i+1] = htoa[(val & 0xF0) >> 4];
-	g_sbuf[i+2] = htoa[(val & 0x0F)];
+	nfc_sniffer_buffer[i+1] = htoa[(val & 0xF0) >> 4];
+	nfc_sniffer_buffer[i+2] = htoa[(val & 0x0F)];
 	val = ((nb_cycles & 0x00FF0000) >> 16);
-	g_sbuf[i+3] = htoa[(val & 0xF0) >> 4];
-	g_sbuf[i+4] = htoa[(val & 0x0F)];
+	nfc_sniffer_buffer[i+3] = htoa[(val & 0xF0) >> 4];
+	nfc_sniffer_buffer[i+4] = htoa[(val & 0x0F)];
 	val = ((nb_cycles & 0x0000FF00) >> 8);
-	g_sbuf[i+5] = htoa[(val & 0xF0) >> 4];
-	g_sbuf[i+6] = htoa[(val & 0x0F)];
+	nfc_sniffer_buffer[i+5] = htoa[(val & 0xF0) >> 4];
+	nfc_sniffer_buffer[i+6] = htoa[(val & 0x0F)];
 	val = (nb_cycles & 0x000000FF);
-	g_sbuf[i+7] = htoa[(val & 0xF0) >> 4];
-	g_sbuf[i+8] = htoa[(val & 0x0F)];
+	nfc_sniffer_buffer[i+7] = htoa[(val & 0xF0) >> 4];
+	nfc_sniffer_buffer[i+8] = htoa[(val & 0x0F)];
 
-	g_sbuf_idx +=9;
+	nfc_sniffer_index +=9;
 }
 
 __attribute__ ((always_inline)) static inline
@@ -661,43 +632,32 @@ void sniff_write_8b_ASCII_HEX(uint8_t data, bool add_space)
 {
 	uint32_t i;
 
-	i = g_sbuf_idx;
-	g_sbuf[i+0] = htoa[(data & 0xF0) >> 4];
-	g_sbuf[i+1] = htoa[(data & 0x0F)];
+	i = nfc_sniffer_index;
+	nfc_sniffer_buffer[i+0] = htoa[(data & 0xF0) >> 4];
+	nfc_sniffer_buffer[i+1] = htoa[(data & 0x0F)];
 	if (add_space == TRUE) {
-		g_sbuf[i+2] = ' ';
-		g_sbuf_idx +=3;
+		nfc_sniffer_buffer[i+2] = ' ';
+		nfc_sniffer_index +=3;
 	} else {
-		g_sbuf_idx +=2;
+		nfc_sniffer_index +=2;
 	}
-}
-
-__attribute__ ((always_inline)) static inline
-void sniff_write_Parity_ASCII(uint8_t data)
-{
-	uint32_t i;
-
-	i = g_sbuf_idx;
-	g_sbuf[i+0] = htoa[(data & 0x0F)];
-	g_sbuf[i+1] = ' ';
-	g_sbuf_idx +=2;
 }
 
 __attribute__ ((always_inline)) static inline
 void sniff_write_bin_timestamp(uint32_t timestamp_nb_cycles)
 {
-	memcpy(&g_sbuf[g_sbuf_idx], (uint8_t*)&timestamp_nb_cycles, sizeof(uint32_t));
-	g_sbuf_idx +=4;
+	memcpy(&nfc_sniffer_buffer[nfc_sniffer_index], (uint8_t*)&timestamp_nb_cycles, sizeof(uint32_t));
+	nfc_sniffer_index +=4;
 }
 
 __attribute__ ((always_inline)) static inline
 void sniff_write_bin_8b(uint8_t data)
 {
-	g_sbuf[g_sbuf_idx] = data;
-	g_sbuf_idx++;
+	nfc_sniffer_buffer[nfc_sniffer_index] = data;
+	nfc_sniffer_index++;
 }
 
-void hydranfc_sniff_14443A(t_hydra_console *con, bool start_of_frame, bool end_of_frame, bool sniff_trace_uart1)
+void hydranfc_sniff_14443A(t_hydra_console *con, bool start_of_frame, bool end_of_frame, bool sniff_trace_uart1, bool arg_sniff_pcap_output)
 {
 	(void)con;
 	uint8_t  ds_data, tmp_u8_data, tmp_u8_data_nb_bit;
@@ -714,7 +674,12 @@ void hydranfc_sniff_14443A(t_hydra_console *con, bool start_of_frame, bool end_o
 	uint32_t uart_max;
 	uint32_t uart_nb_loop;
 #endif
+	// init global
+	sniff_pcap_output = arg_sniff_pcap_output ? 1 : 0;
+
 	tprintf("sniff_14443A start\r\n");
+	if (sniff_pcap_output)
+		tprintf("(pcap mode is on)\r\n");
 	tprintf("Abort/Exit by pressing K4 button\r\n");
 	init_sniff_nfc(ISO14443A);
 
@@ -732,10 +697,13 @@ void hydranfc_sniff_14443A(t_hydra_console *con, bool start_of_frame, bool end_o
 	uart_buf_pos = 0;
 	old_protocol_found = 0;
 	protocol_found = 0;
-	g_sbuf_idx = 0;
+	nfc_sniffer_index = 0;
 
 	/* Lock Kernel for sniffer */
 	chSysLock();
+
+	if (sniff_pcap_output)
+		sniff_write_pcap_global_header();
 
 	/* Main Loop */
 	while (TRUE) {
@@ -747,6 +715,13 @@ void hydranfc_sniff_14443A(t_hydra_console *con, bool start_of_frame, bool end_o
 			D4_OFF;
 			old_data_bit = 0;
 			f_data = 0;
+
+			uint32_t unknown = 0;
+			uint8_t pow = 0x7F;
+			uint32_t nb_cycles_start = 0;
+			uint32_t nb_cycles_end = 0;
+
+			nb_cycles_start = bsp_get_cyclecounter();
 
 			u32_data = WaitGetDMABuffer();
 			old_data_bit = (uint32_t)(u32_data&1);
@@ -761,6 +736,7 @@ void hydranfc_sniff_14443A(t_hydra_console *con, bool start_of_frame, bool end_o
 				chThdSleepMilliseconds(50);
 				if(sniff_trace_uart1)
 					deinitUART1_sniff();
+				pool_free(nfc_sniffer_buffer);
 				return;
 			}
 
@@ -787,7 +763,7 @@ void hydranfc_sniff_14443A(t_hydra_console *con, bool start_of_frame, bool end_o
 			TST_OFF;
 			u32_data = WaitGetDMABuffer();
 			if(start_of_frame == true)
-				start_frame_cycles = get_cyclecounter();
+				start_frame_cycles = bsp_get_cyclecounter();
 			TST_ON;
 			f_data |= u32_data>>rsh_bit;
 
@@ -813,13 +789,15 @@ void hydranfc_sniff_14443A(t_hydra_console *con, bool start_of_frame, bool end_o
 			case MILLER_MODIFIED_106KHZ:
 				/* Miller Modified@~106Khz Start bit */
 				old_protocol_found = MILLER_MODIFIED_106KHZ;
-				sniff_write_pcd();
+				if (!sniff_pcap_output)
+					sniff_write_pcd();
 				break;
 
 			case MANCHESTER_106KHZ:
 				/* Manchester@~106Khz Start bit */
 				old_protocol_found = MANCHESTER_106KHZ;
-				sniff_write_picc();
+				if (!sniff_pcap_output)
+					sniff_write_picc();
 				break;
 
 			default:
@@ -834,7 +812,8 @@ void hydranfc_sniff_14443A(t_hydra_console *con, bool start_of_frame, bool end_o
 					// New Word
 					rsh_miller_bit = 15; /* Between 2 to 3.1us => 7 to 11bits => Average 9bits + 6bits(margin) =< 32-15 = 17 bit */
 					lsh_miller_bit = 32-rsh_miller_bit;
-					sniff_write_pcd();
+					if (!sniff_pcap_output)
+						sniff_write_pcd();
 					/* Start Bit not included in data buffer */
 				} else {
 					old_protocol_found = MILLER_MODIFIED_106KHZ;
@@ -844,7 +823,8 @@ void hydranfc_sniff_14443A(t_hydra_console *con, bool start_of_frame, bool end_o
 					// New Word
 					rsh_miller_bit = 15; /* Between 2 to 3.1us => 7 to 11bits => Average 9bits + 6bits(margin) =< 32-15 = 17 bit */
 					lsh_miller_bit = 32-rsh_miller_bit;
-					sniff_write_unknown_protocol(ds_data);
+					if (!sniff_pcap_output)
+						sniff_write_unknown_protocol(ds_data);
 				}
 				break;
 			}
@@ -856,7 +836,7 @@ void hydranfc_sniff_14443A(t_hydra_console *con, bool start_of_frame, bool end_o
 			while (1) {
 				if ( (K4_BUTTON) || (hydrabus_ubtn()) ) {
 					if(end_of_frame == true)
-						total_frame_cycles = get_cyclecounter() - start_frame_cycles;
+						total_frame_cycles = bsp_get_cyclecounter() - start_frame_cycles;
 					break;
 				}
 
@@ -882,7 +862,7 @@ void hydranfc_sniff_14443A(t_hydra_console *con, bool start_of_frame, bool end_o
 						if (old_data_counter>1) {
 							/* No new data => End Of Frame detected => Wait new data & synchro */
 							if(end_of_frame == true)
-								total_frame_cycles = get_cyclecounter() - start_frame_cycles;
+								total_frame_cycles = bsp_get_cyclecounter() - start_frame_cycles;
 							break;
 						}
 					} else {
@@ -907,7 +887,10 @@ void hydranfc_sniff_14443A(t_hydra_console *con, bool start_of_frame, bool end_o
 						nb_data++;
 						tmp_u8_data_nb_bit=0;
 						/* Convert Hex to ASCII + Space */
-						sniff_write_8b_ASCII_HEX(tmp_u8_data, TRUE);
+						if (!sniff_pcap_output)
+							sniff_write_8b_ASCII_HEX(tmp_u8_data, TRUE);
+						else
+							sniff_write_pcap_data(tmp_u8_data);
 
 						tmp_u8_data=0; /* Parity bit discarded */
 					}
@@ -921,7 +904,10 @@ void hydranfc_sniff_14443A(t_hydra_console *con, bool start_of_frame, bool end_o
 						nb_data++;
 						tmp_u8_data_nb_bit=0;
 						/* Convert Hex to ASCII + Space */
-						sniff_write_8b_ASCII_HEX(tmp_u8_data, TRUE);
+						if (!sniff_pcap_output)
+							sniff_write_8b_ASCII_HEX(tmp_u8_data, TRUE);
+						else
+							sniff_write_pcap_data(tmp_u8_data);
 
 						tmp_u8_data=0; /* Parity bit discarded */
 					}
@@ -931,12 +917,17 @@ void hydranfc_sniff_14443A(t_hydra_console *con, bool start_of_frame, bool end_o
 					nb_data++;
 					/* Unknown protocol */
 					/* Convert Hex to ASCII */
-					sniff_write_8b_ASCII_HEX(ds_data, FALSE);
+					if (!sniff_pcap_output)
+						sniff_write_8b_ASCII_HEX(ds_data, FALSE);
+					else {
+						unknown = 1;
+						sniff_write_pcap_data(tmp_u8_data);
+					}
 					break;
 				}
 				/* For safety to avoid potential buffer overflow ... */
-				if (g_sbuf_idx >= NB_SBUFFER) {
-					g_sbuf_idx = NB_SBUFFER;
+				if (nfc_sniffer_index >= NB_SBUFFER) {
+					nfc_sniffer_index = NB_SBUFFER;
 				}
 			}
 
@@ -944,24 +935,31 @@ void hydranfc_sniff_14443A(t_hydra_console *con, bool start_of_frame, bool end_o
 			if (tmp_u8_data_nb_bit>3) {
 					nb_data++;
 					/* Convert Hex to ASCII + Space */
-					sniff_write_8b_ASCII_HEX(tmp_u8_data, FALSE);
+					if (!sniff_pcap_output)
+						sniff_write_8b_ASCII_HEX(tmp_u8_data, FALSE);
+					else
+						sniff_write_pcap_data(tmp_u8_data);
 			}
-			if(end_of_frame == true)
-				sniff_write_frameduration(total_frame_cycles);
+
+			nb_cycles_end = bsp_get_cyclecounter();
+
+			if (!sniff_pcap_output)
+				if(end_of_frame == true)
+					sniff_write_frameduration(total_frame_cycles);
 
 			if(sniff_trace_uart1)
 			{
 				uint32_t uart_buf_size;
-				uart_buf_size = (g_sbuf_idx - uart_buf_pos);
+				uart_buf_size = (nfc_sniffer_index - uart_buf_pos);
 				if (uart_buf_size > 0) {
 #ifdef STAT_UART_WRITE
 					uint32_t ticks;
-					ticks = get_cyclecounter();
+					ticks = bsp_get_cyclecounter();
 #endif
-					bsp_uart_write_u8(BSP_DEV_UART1, &g_sbuf[uart_buf_pos], uart_buf_size);
-					uart_buf_pos = g_sbuf_idx;
+					bsp_uart_write_u8(BSP_DEV_UART1, &nfc_sniffer_buffer[uart_buf_pos], uart_buf_size);
+					uart_buf_pos = nfc_sniffer_index;
 #ifdef STAT_UART_WRITE
-					ticks = (get_cyclecounter() - ticks);
+					ticks = (bsp_get_cyclecounter() - ticks);
 					uart_nb_loop++;
 
 					if(ticks < uart_min)
@@ -972,21 +970,45 @@ void hydranfc_sniff_14443A(t_hydra_console *con, bool start_of_frame, bool end_o
 #endif
 				}
 				/* For safety to avoid buffer overflow and restart buffer */
-				if (g_sbuf_idx >= NB_SBUFFER) {
-					g_sbuf_idx = 0;
+				if (nfc_sniffer_index >= NB_SBUFFER) {
+					nfc_sniffer_index = 0;
 					uart_buf_pos = 0;
 				}
 			}else
 			{
 				/* For safety to avoid buffer overflow */
-				if (g_sbuf_idx >= NB_SBUFFER) {
-					g_sbuf_idx = NB_SBUFFER;
+				if (nfc_sniffer_index >= NB_SBUFFER) {
+					nfc_sniffer_index = NB_SBUFFER;
 				}
 			}
+
+			if (sniff_pcap_output) {
+				sniff_write_pcap_packet_header(nb_cycles_start);
+
+				if (unknown == 1)
+					sniff_write_data_header(pow, 3, 1,
+							nb_cycles_end, 0);
+				else
+					sniff_write_data_header(pow, protocol_found, 1,
+							nb_cycles_end, 0);
+
+				uint32_t y = 0;
+
+				do {
+					uint32_t i;
+					i = nfc_sniffer_index;
+
+					nfc_sniffer_buffer[i + 0] = fbuff[y];
+					nfc_sniffer_index += 1;
+					y++;
+				} while (y < tmp_sniffer_get_size());
+
+				tmp_sbuf_idx = 0;
+			}
+
 			TST_OFF;
 		}
 	} // Main While Loop
-
 }
 
 void hydranfc_sniff_14443A_bin(t_hydra_console *con, bool start_of_frame, bool end_of_frame, bool parity)
@@ -1045,7 +1067,7 @@ void hydranfc_sniff_14443A_bin(t_hydra_console *con, bool start_of_frame, bool e
 			D4_OFF;
 			old_data_bit = 0;
 			f_data = 0;
-			g_sbuf_idx = sizeof(bin_frame_hdr);
+			nfc_sniffer_index = sizeof(bin_frame_hdr);
 
 			u32_data = WaitGetDMABuffer();
 			old_data_bit = (uint32_t)(u32_data&1);
@@ -1059,6 +1081,7 @@ void hydranfc_sniff_14443A_bin(t_hydra_console *con, bool start_of_frame, bool e
 				/* Wait a bit in order to display all text */
 				chThdSleepMilliseconds(50);
 				deinitUART1_sniff();
+				pool_free(nfc_sniffer_buffer);
 				return;
 			}
 
@@ -1085,7 +1108,7 @@ void hydranfc_sniff_14443A_bin(t_hydra_console *con, bool start_of_frame, bool e
 			TST_OFF;
 			u32_data = WaitGetDMABuffer();
 			if(start_of_frame == true)
-				sniff_write_bin_timestamp(get_cyclecounter());
+				sniff_write_bin_timestamp(bsp_get_cyclecounter());
 			TST_ON;
 			f_data |= u32_data>>rsh_bit;
 
@@ -1155,7 +1178,7 @@ void hydranfc_sniff_14443A_bin(t_hydra_console *con, bool start_of_frame, bool e
 			while (1) {
 				if ( (K4_BUTTON) || (hydrabus_ubtn()) ) {
 					if(end_of_frame == true)
-						end_of_frame_cycles = get_cyclecounter();
+						end_of_frame_cycles = bsp_get_cyclecounter();
 					break;
 				}
 
@@ -1181,7 +1204,7 @@ void hydranfc_sniff_14443A_bin(t_hydra_console *con, bool start_of_frame, bool e
 						if (old_data_counter>1) {
 							/* No new data => End Of Frame detected => Wait new data & synchro */
 							if(end_of_frame == true)
-								end_of_frame_cycles = get_cyclecounter();
+								end_of_frame_cycles = bsp_get_cyclecounter();
 							break;
 						}
 					} else {
@@ -1243,8 +1266,8 @@ void hydranfc_sniff_14443A_bin(t_hydra_console *con, bool start_of_frame, bool e
 					break;
 				}
 				/* For safety to avoid potential buffer overflow ... */
-				if (g_sbuf_idx >= NB_SBUFFER) {
-					g_sbuf_idx = NB_SBUFFER;
+				if (nfc_sniffer_index >= NB_SBUFFER) {
+					nfc_sniffer_index = NB_SBUFFER;
 				}
 			}
 			/* End of Frame detected check if incomplete byte (at least 4bit) is present to write it as output */
@@ -1256,16 +1279,16 @@ void hydranfc_sniff_14443A_bin(t_hydra_console *con, bool start_of_frame, bool e
 			if(end_of_frame == true)
 				sniff_write_bin_timestamp(end_of_frame_cycles);
 
-			if ((nb_data > 0) && (g_sbuf_idx >  sizeof(bin_frame_hdr))) {
+			if ((nb_data > 0) && (nfc_sniffer_index >  sizeof(bin_frame_hdr))) {
 #ifdef STAT_UART_WRITE
 				uint32_t ticks;
-				ticks = get_cyclecounter();
+				ticks = bsp_get_cyclecounter();
 #endif
-				bin_frame_hdr.data_size = g_sbuf_idx;
-				memcpy(&g_sbuf[0], (uint8_t*)&bin_frame_hdr, sizeof(bin_frame_hdr));
-				bsp_uart_write_u8(BSP_DEV_UART1, &g_sbuf[0], g_sbuf_idx);
+				bin_frame_hdr.data_size = nfc_sniffer_index;
+				memcpy(&nfc_sniffer_buffer[0], (uint8_t*)&bin_frame_hdr, sizeof(bin_frame_hdr));
+				bsp_uart_write_u8(BSP_DEV_UART1, &nfc_sniffer_buffer[0], nfc_sniffer_index);
 #ifdef STAT_UART_WRITE
-				ticks = (get_cyclecounter() - ticks);
+				ticks = (bsp_get_cyclecounter() - ticks);
 				uart_nb_loop++;
 
 				if(ticks < uart_min)
@@ -1336,7 +1359,7 @@ void hydranfc_sniff_14443AB_bin_raw(t_hydra_console *con, bool start_of_frame, b
 			D4_OFF;
 			old_data_bit = 0;
 			f_data = 0;
-			g_sbuf_idx = sizeof(bin_frame_hdr);
+			nfc_sniffer_index = sizeof(bin_frame_hdr);
 
 			u32_data = WaitGetDMABuffer();
 			old_data_bit = (uint32_t)(u32_data&1);
@@ -1350,6 +1373,7 @@ void hydranfc_sniff_14443AB_bin_raw(t_hydra_console *con, bool start_of_frame, b
 				/* Wait a bit in order to display all text */
 				chThdSleepMilliseconds(50);
 				deinitUART1_sniff();
+				pool_free(nfc_sniffer_buffer);
 				return;
 			}
 			
@@ -1372,7 +1396,7 @@ void hydranfc_sniff_14443AB_bin_raw(t_hydra_console *con, bool start_of_frame, b
 			TST_OFF;
 			u32_data = WaitGetDMABuffer();
 			if(start_of_frame == true)
-				sniff_write_bin_timestamp(get_cyclecounter());
+				sniff_write_bin_timestamp(bsp_get_cyclecounter());
 			TST_ON;
 			f_data |= u32_data>>rsh_bit;
 
@@ -1392,7 +1416,7 @@ void hydranfc_sniff_14443AB_bin_raw(t_hydra_console *con, bool start_of_frame, b
 			while (1) {
 				if ( (K4_BUTTON) || (hydrabus_ubtn()) ) {
 					if(end_of_frame == true)
-						sniff_write_bin_timestamp(get_cyclecounter());
+						sniff_write_bin_timestamp(bsp_get_cyclecounter());
 					break;
 				}
 
@@ -1418,7 +1442,7 @@ void hydranfc_sniff_14443AB_bin_raw(t_hydra_console *con, bool start_of_frame, b
 						if (old_data_counter>1) {
 							/* No new data => End Of Frame detected => Wait new data & synchro */
 							if(end_of_frame == true)
-								sniff_write_bin_timestamp(get_cyclecounter());
+								sniff_write_bin_timestamp(bsp_get_cyclecounter());
 							break;
 						}
 					} else {
@@ -1437,21 +1461,21 @@ void hydranfc_sniff_14443AB_bin_raw(t_hydra_console *con, bool start_of_frame, b
 				sniff_write_bin_8b(ds_data);
 
 				/* For safety to avoid potential buffer overflow ... */
-				if (g_sbuf_idx >= NB_SBUFFER) {
-					g_sbuf_idx = NB_SBUFFER;
+				if (nfc_sniffer_index >= NB_SBUFFER) {
+					nfc_sniffer_index = NB_SBUFFER;
 				}
 			}
 			/* End of Frame detected */
 #ifdef STAT_UART_WRITE
 			{
 				uint32_t ticks;
-				ticks = get_cyclecounter();
+				ticks = bsp_get_cyclecounter();
 #endif
-				bin_frame_hdr.data_size = g_sbuf_idx;
-				memcpy(&g_sbuf[0], (uint8_t*)&bin_frame_hdr, sizeof(bin_frame_hdr));
-				bsp_uart_write_u8(BSP_DEV_UART1, &g_sbuf[0], g_sbuf_idx);
+				bin_frame_hdr.data_size = nfc_sniffer_index;
+				memcpy(&nfc_sniffer_buffer[0], (uint8_t*)&bin_frame_hdr, sizeof(bin_frame_hdr));
+				bsp_uart_write_u8(BSP_DEV_UART1, &nfc_sniffer_buffer[0], nfc_sniffer_index);
 #ifdef STAT_UART_WRITE
-				ticks = (get_cyclecounter() - ticks);
+				ticks = (bsp_get_cyclecounter() - ticks);
 				uart_nb_loop++;
 
 				if(ticks < uart_min)

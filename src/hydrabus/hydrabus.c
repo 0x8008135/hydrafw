@@ -26,15 +26,10 @@
 #define ULED_OFF (palClearPad(GPIOA, 4))
 
 /*
- * Working area for driver.
- */
-static uint8_t sd_scratchpad[512];
-
-/*
  * SDIO configuration.
  */
-static const SDCConfig sdccfg = {
-  sd_scratchpad,
+const SDCConfig sdccfg = {
+  NULL,
   SDC_MODE_4BIT
 };
 
