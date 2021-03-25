@@ -62,7 +62,7 @@ static int init(t_hydra_console *con, t_tokenline_parsed *p)
 	/* Process cmdline arguments, skipping "usb". */
 	tokens_used = 1 + exec(con, p, 1);
     
-    bsp_usb_init(proto->dev_num, proto);
+    bsp_usb_init(con, proto->dev_num, proto, BSP_DEV_USB2, 0);
 
 	show_params(con);
 
@@ -116,7 +116,7 @@ static void cleanup(t_hydra_console *con)
 {
      mode_config_proto_t* proto = &con->mode->proto;
  
-     bsp_usb_deinit(proto->dev_num);
+     bsp_usb_deinit(con, proto->dev_num);
 }
 
 static uint32_t read(t_hydra_console *con, uint8_t *rx_data, uint8_t nb_data)

@@ -17,8 +17,7 @@ limitations under the License.
 
 #include "bsp.h"
 #include "mode_config.h"
-#include "stm32f405xx.h"
-#include "stm32f4xx_hal.h"
+#include "hydrabus_mode_usb.h"
 
 
 typedef enum {
@@ -28,9 +27,11 @@ typedef enum {
 } bsp_dev_usb_t;
 
 
-bsp_status_t bsp_usb_init(bsp_dev_usb_t dev_num, mode_config_proto_t* mode_conf);
-bsp_status_t bsp_usb_deinit(bsp_dev_usb_t dev_num);
+bsp_status_t bsp_usb_init(t_hydra_console *con, bsp_dev_usb_t dev_num, mode_config_proto_t* mode_conf, uint8_t interface, uint8_t mode);
+bsp_status_t bsp_usb_deinit(t_hydra_console *con, bsp_dev_usb_t dev_num);
 bsp_status_t bsp_usb_read(t_hydra_console *con, bsp_dev_usb_t dev_num, uint8_t* dst, uint8_t nb_data);
-bsp_status_t bsp_usb_write(bsp_dev_usb_t dev_num, uint8_t* src, uint8_t ch_ep_num, uint16_t len);
+bsp_status_t bsp_usb_write(bsp_dev_usb_t dev_num);
+bsp_status_t bsp_usb_setup(t_hydra_console *con);
+bsp_status_t bsp_usb_bridge(t_hydra_console *con);
 
 #endif /* _BSP_USB_H_ */
